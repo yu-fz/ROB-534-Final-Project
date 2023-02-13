@@ -10,5 +10,6 @@
 ### Helpful Reference Material: 
 Motion Planning:
 [Robotic Manipulation Chap. 7](https://manipulation.csail.mit.edu/trajectories.html)
+
 Solving differential IK as optimization: 
 [Robotic Manipulation Chap. 3](https://manipulation.csail.mit.edu/pick.html)
