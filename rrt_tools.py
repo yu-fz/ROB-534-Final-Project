@@ -9,7 +9,7 @@ class RRT_tools:
         
     def find_nearest_node_in_RRT_graph(self, q_sample):
         #nearest_node = self.rrt_tree.nearest(q_sample)
-        nearest_node,_ = self.rrt_tree.kd_nearest(q_sample)
+        nearest_node,_ = self.rrt_tree.kd_nearest(q_sample) #much faster 
         return nearest_node
     
     def sample_node_in_configuration_space(self):
@@ -37,7 +37,8 @@ class RRT_tools:
     def node_reaches_goal(self, node):
 
         l2_distance = np.linalg.norm(np.array(node.value)-np.array(self.problem.goal))
-        if l2_distance < 0.0001:
+        #print(l2_distance)
+        if l2_distance < 0.001:
             return True
         return False
     
