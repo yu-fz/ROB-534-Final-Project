@@ -14,6 +14,7 @@ from pydrake.all import (DiagramBuilder, FindResourceOrThrow,
                          RigidTransform, RollPitchYaw, RotationMatrix,
                          Simulator, SolutionResult, Solve, StartMeshcat)
 from pydrake.multibody import inverse_kinematics
+from scipy.spatial import KDTree 
 
 class ManipulationStationSim:
     def __init__(self, meshcat, is_visualizing=False):
@@ -245,12 +246,35 @@ class RRT:
         self.cspace = cspace  # robot.ConfigurationSpace
         self.size = 1  # int length of path
         self.max_recursion = 1000  # int length of longest possible path
+        self.configurations_dict = {self.root.value: self.root} # dict of all nodes added to RRT tree, starting with a single root node
 
     def add_configuration(self, parent_node, child_value):
         child_node = TreeNode(child_value, parent_node)
         parent_node.children.append(child_node)
         self.size += 1
         return child_node
+    def kd_nearest(self, configuration):
+        """
+        Finds the nearest node by distance to configuration in the configuration space using a KD-tree.
+        Args:
+            configuration: tuple of floats representing a configuration of a
+                robot
+        Returns:
+            closest: TreeNode. the closest node in the configuration space
+                to configuration
+            distance: float. distance from configuration to closest
+        """
+        assert self.cspace.valid_configuration(configuration)
+        # Take all c-space vector keys in configurations dict and convert it to np array
+        configuration_vectors = list(self.configurations_dict.keys())
+        # convert list of configuration vectors to np array 
+        all_configurations = np.array(configuration_vectors) 
+        # Build KD-tree 
+        config_kd_tree = KDTree(all_configurations)
+        distance, index = config_kd_tree.query(x=configuration,k=1) #query KD tree for nearest neighbor
+        # find which node is the nearest neighbor by querying the configurations dictionary 
+        closest = self.configurations_dict[configuration_vectors[index]]
+        return closest, distance 
 
     # Brute force nearest, handles general distance functions
     def nearest(self, configuration):

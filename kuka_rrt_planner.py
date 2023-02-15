@@ -1,5 +1,6 @@
 from rrt_tools import RRT_tools
 from kuka_sim import *
+import random 
 
 
 class KukaRRTPlanner():
@@ -54,14 +55,37 @@ class KukaRRTPlanner():
         rrt_tools = RRT_tools(self.iiwa_problem)
         q_goal = problem.goal
         q_start = problem.start
-
         RUN_RRT = True
-        while RUN_RRT:
-            #sample random point in cspace
-            new_rrt_node = rrt_tools.sample_node_in_configuration_space()
-            RUN_RRT = False
-        return new_rrt_node
+        iters = 0
+        while RUN_RRT and iters < max_iterations:
+            #sample goal with prob p:
+            rand_num = random.random()
+            if rand_num < prob_sample_q_goal:
+                new_configuration_space_sample = q_goal
+            else:
+            #else sample random point in cspace
+                new_configuration_space_sample = rrt_tools.sample_node_in_configuration_space()
+            #Find nearest neighbor node 
+            nearest_neighbor_node = rrt_tools.find_nearest_node_in_RRT_graph(new_configuration_space_sample)
+            #Line Search to find how far to extend 
+            feasible_path = rrt_tools.calc_intermediate_qs_wo_collision(nearest_neighbor_node.value,new_configuration_space_sample)
+            #Pick the configuration space point as far as possible in direction of sample 
+            furthest_safe_q = feasible_path[-1]
+            new_child_node = rrt_tools.grow_rrt_tree(parent_node=nearest_neighbor_node, q_sample=furthest_safe_q)
+            #add new node to dict for kd-tree
+            rrt_tools.rrt_tree.configurations_dict[new_child_node.value] = new_child_node
+            #Check if the new node is within tolerance to goal 
+            if rrt_tools.node_reaches_goal(node=new_child_node):
+                print("found goal!")
+                RUN_RRT = False
+            iters += 1
+        return new_configuration_space_sample
+        end_time = time.time()
+        print(f"time taken: {end_time - start_time}")
     
 do_viz = False
 kuka_rrt = KukaRRTPlanner(do_viz=do_viz)
+start_time = time.time()
 print(kuka_rrt.rrt_planning(kuka_rrt.iiwa_problem))
+end_time = time.time()
+print(f"time taken: {end_time - start_time}")

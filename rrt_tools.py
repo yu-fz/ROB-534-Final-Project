@@ -1,4 +1,5 @@
 from kuka_sim import RRT, TreeNode
+import numpy as np
 class RRT_tools:
     def __init__(self, problem):
         # rrt is a tree 
@@ -7,7 +8,8 @@ class RRT_tools:
         self.problem = problem
         
     def find_nearest_node_in_RRT_graph(self, q_sample):
-        nearest_node = self.rrt_tree.nearest(q_sample)
+        #nearest_node = self.rrt_tree.nearest(q_sample)
+        nearest_node,_ = self.rrt_tree.kd_nearest(q_sample)
         return nearest_node
     
     def sample_node_in_configuration_space(self):
@@ -33,7 +35,11 @@ class RRT_tools:
         return child_node
     
     def node_reaches_goal(self, node):
-        return node.value == self.problem.goal
+
+        l2_distance = np.linalg.norm(np.array(node.value)-np.array(self.problem.goal))
+        if l2_distance < 0.0001:
+            return True
+        return False
     
     def backup_path_from_node(self, node):
         path = [node.value]
