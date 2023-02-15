@@ -3,19 +3,20 @@ from kuka_sim import *
 
 
 class KukaRRTPlanner():
-    def __init__(self) -> None:
-        self.meshcat = self._start_meshcat_vis()
-        self.env = ManipulationStationSim(self.meshcat,True)
+    def __init__(self,do_viz: bool) -> None:
+        self.meshcat = None
+        if do_viz:
+            self.meshcat = self._start_meshcat_vis()
+            AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=T_WG_goal, opacity=.5)
+        self.env = ManipulationStationSim(self.meshcat,do_viz)
         self.q_start = self.env.q0
         R_WG = RotationMatrix(np.array([[0,1,0], [1,0,0], [0,0,-1]]).T)
         T_WG_goal = RigidTransform(p=np.array([4.69565839e-01, 2.95894043e-16, 0.65]), R=R_WG)
-        AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=T_WG_goal, opacity=.5)
         ik_solver = IKSolver()
         self.q_goal, optimal = ik_solver.solve(T_WG_goal, q_guess=self.q_start)
-        print(self.q_goal)
         self.gripper_setpoint = 0.1
         self.door_angle = np.pi/2 - 0.001
-        self.left_door_angle = -np.pi/2
+        self.left_door_angle = -np.pi/6
         self.right_door_angle = np.pi/2
 
         self.iiwa_problem = IiwaProblem(
@@ -26,8 +27,8 @@ class KukaRRTPlanner():
             right_door_angle=self.right_door_angle,
             meshcat = self.meshcat,
             is_visualizing=False)
-
-        self.env.DrawStation(self.q_goal,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
+        if do_viz:
+            self.env.DrawStation(self.q_goal,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
     
     def _start_meshcat_vis(self):
         """
@@ -53,8 +54,14 @@ class KukaRRTPlanner():
         rrt_tools = RRT_tools(self.iiwa_problem)
         q_goal = problem.goal
         q_start = problem.start
-        
-        return None
-    
 
-kuka_rrt = KukaRRTPlanner()
+        RUN_RRT = True
+        while RUN_RRT:
+            #sample random point in cspace
+            new_rrt_node = rrt_tools.sample_node_in_configuration_space()
+            RUN_RRT = False
+        return new_rrt_node
+    
+do_viz = False
+kuka_rrt = KukaRRTPlanner(do_viz=do_viz)
+print(kuka_rrt.rrt_planning(kuka_rrt.iiwa_problem))
