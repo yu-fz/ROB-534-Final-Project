@@ -207,7 +207,6 @@ class KukaRRTPlanner():
         Output:
             trajectory: (function(x)) function that returns the interpolated configuration vector from  0<=t<=total_trajectory_time 
         """
-        print(len(rrt_solution))
         x = np.linspace(0, total_trajectory_time,len(rrt_solution))
         y = np.squeeze(np.array([rrt_solution]))
         trajectory = scipy.interpolate.interp1d(x, y.T)
