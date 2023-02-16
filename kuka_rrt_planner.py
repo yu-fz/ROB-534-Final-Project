@@ -1,7 +1,8 @@
 from rrt_tools import RRT_tools
 from kuka_sim import *
 import random 
-
+import time
+import scipy.interpolate
 
 class KukaRRTPlanner():
     def __init__(self) -> None:
@@ -151,34 +152,7 @@ class KukaRRTPlanner():
 
         print("found path!")
         return rrt_connect_solution
-            # #sample goal with prob p:
-            # rand_num = random.random()
-            # if rand_num < prob_sample_q_goal:
-            #     new_configuration_space_sample = q_goal
-            # else:
-            # #else sample random point in cspace
-            #     new_configuration_space_sample = rrt_tools.sample_node_in_configuration_space()
-            # #Find nearest neighbor node 
-            # nearest_neighbor_node = rrt_tools.find_nearest_node_in_RRT_graph(new_configuration_space_sample)
-            # #Line Search to find how far to extend 
-            # feasible_path = rrt_tools.calc_intermediate_qs_wo_collision(nearest_neighbor_node.value,new_configuration_space_sample)
-            # #Pick the configuration space point as far as possible in direction of sample 
-            # furthest_safe_q = feasible_path[-1]
-            # new_child_node = rrt_tools.grow_rrt_tree(parent_node=nearest_neighbor_node, q_sample=furthest_safe_q)
-            # #add new node to dict for kd-tree
-            # rrt_tools.rrt_tree.configurations_dict[new_child_node.value] = new_child_node
-            # #Check if the new node is within tolerance to goal 
-        #     if rrt_tools.node_reaches_goal(node=new_child_node):
-        #         print("Found Goal!")
-        #         #We're done, now backup to get the path 
-        #         rrt_solution = rrt_tools.backup_path_from_node(new_child_node)
-        #         RUN_RRT = False
-        #     iters += 1
-        # if len(rrt_solution) == 0:
-        #     print("No solution was found within iteration limit")
-        #     pass 
     
-
     def rrt_planning(self,problem, max_iterations=50e3, prob_sample_q_goal=.05):
         """
         Input:
@@ -224,7 +198,20 @@ class KukaRRTPlanner():
         if len(rrt_solution) == 0:
             print("No solution was found within iteration limit")
         return rrt_solution
-
+    def make_RRT_trajectory(self, rrt_solution: list, total_trajectory_time: int):
+        """
+        Constructs trajectory from list of configurations returned by the RRT algorithm 
+        Input:
+            rrt_solution: list of configuration vectors 
+            total_trajectory_time: time to move between start and goal configuration
+        Output:
+            trajectory: (function(x)) function that returns the interpolated configuration vector from  0<=t<=total_trajectory_time 
+        """
+        print(len(rrt_solution))
+        x = np.linspace(0, total_trajectory_time,len(rrt_solution))
+        y = np.squeeze(np.array([rrt_solution]))
+        trajectory = scipy.interpolate.interp1d(x, y.T)
+        return trajectory 
     def render_RRT_Solution(self,rrt_solution: list):
         """
         Animate RRT path 
@@ -236,12 +223,22 @@ class KukaRRTPlanner():
             raise ValueError("path to animate cannot be empty.")
         #start recording 
         print("Animating Trajectory....")
-        animation_env.viz.StartRecording(set_transforms_while_recording = True)
         diagram = animation_env.diagram
         diagram_context = animation_env.context_diagram
-        for kuka_q in rrt_solution:
-            animation_env.DrawStation(kuka_q,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
-            time.sleep(0.1)
+        t = 0 
+        time_end = 10
+        dt = 0.1
+        config_space_trajectory = self.make_RRT_trajectory(rrt_solution,time_end)
+        sim = Simulator(diagram, diagram_context)
+        animation_env.station.GetInputPort("wsg_position").FixValue(animation_env.context_station,self.gripper_setpoint)
+        animation_env.viz.StartRecording(set_transforms_while_recording = False)
+        while t <= time_end:
+            #update configuration 
+            current_configuration = config_space_trajectory(t)
+            animation_env.station.GetInputPort("iiwa_position").FixValue(animation_env.context_station,current_configuration)           
+            t+=dt 
+            sim.AdvanceTo(t)
+
         animation_env.viz.StopRecording()
         animation_env.viz.PublishRecording()
         #stop recording 
