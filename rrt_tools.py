@@ -1,9 +1,13 @@
 from kuka_sim import RRT, TreeNode
 import numpy as np
 class RRT_tools:
-    def __init__(self, problem):
+    def __init__(self, problem, root_node: str):
         # rrt is a tree 
-        self.rrt_tree = RRT(TreeNode(problem.start), problem.cspace)
+        assert root_node == "start" or root_node == "goal"
+        if root_node == "start":
+            self.rrt_tree = RRT(TreeNode(problem.start), problem.cspace)
+        else:
+            self.rrt_tree = RRT(TreeNode(problem.goal), problem.cspace)
         problem.rrts = [self.rrt_tree]
         self.problem = problem
         
