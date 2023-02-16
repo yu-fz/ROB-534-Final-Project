@@ -10,7 +10,7 @@ class KukaRRTPlanner():
         #Goal outside shelf 
         #self.T_WG_goal = RigidTransform(p=np.array([4.69565839e-01, 2.95894043e-16, 0.65]), R=self.R_WG)
         #Goal inside shelf
-        self.T_WG_goal = RigidTransform(p=np.array([8.19565839e-01, 2.95894043e-16, 0.25]), R=self.R_WG)
+        self.T_WG_goal = RigidTransform(p=np.array([8.19565839e-01, 2.95894043e-16, 0.65]), R=self.R_WG)
         self.meshcat = StartMeshcat()
         self.env = ManipulationStationSim(self.meshcat,is_visualizing)
         self.q_start = self.env.q0
@@ -60,7 +60,7 @@ class KukaRRTPlanner():
         #add new node to dict for kd-tree
         rrt.rrt_tree.configurations_dict[new_child_node.value] = new_child_node
         return rrt, new_child_node
-    def rrt_connect_operation(self, rrt_A: RRT_tools, rrt_A_child_node: TreeNode, rrt_B: RRT_tools):
+    def rrt_connect_operation(self, rrt_A_child_node: TreeNode, rrt_B: RRT_tools):
         """
         Attempts to connect the latest child node of tree A to the nearet neighbor in tree B 
         Input:
@@ -125,9 +125,8 @@ class KukaRRTPlanner():
                 # Extend tree 
                 start_to_goal_rrt_tools, newest_child_node = self.rrt_extend_operation(new_configuration_space_sample,start_to_goal_rrt_tools)
                 # Attempt to connect from the goal rooted tree 
-                success, connecting_node = self.rrt_connect_operation(start_to_goal_rrt_tools,
-                                                                     newest_child_node,
-                                                                     goal_to_start_rrt_tools)
+                success, connecting_node = self.rrt_connect_operation(newest_child_node,
+                                                                      goal_to_start_rrt_tools)
                 if success:
                     RUN_RRT = False
                     rrt_connect_solution = backup_path(start_to_goal_rrt_tools,newest_child_node,goal_to_start_rrt_tools,connecting_node)
@@ -144,9 +143,8 @@ class KukaRRTPlanner():
                 # Extend tree 
                 goal_to_start_rrt_tools, newest_child_node = self.rrt_extend_operation(new_configuration_space_sample,goal_to_start_rrt_tools)
                 # Attempt to connect from the goal rooted tree 
-                success, connecting_node = self.rrt_connect_operation(goal_to_start_rrt_tools,
-                                                                      newest_child_node,
-                                                                      goal_to_start_rrt_tools)
+                success, connecting_node = self.rrt_connect_operation(newest_child_node,
+                                                                      start_to_goal_rrt_tools)
                 if success:
                     RUN_RRT = False
                     rrt_connect_solution = backup_path(goal_to_start_rrt_tools,newest_child_node,start_to_goal_rrt_tools,connecting_node)
@@ -243,6 +241,7 @@ class KukaRRTPlanner():
         diagram_context = animation_env.context_diagram
         for kuka_q in rrt_solution:
             animation_env.DrawStation(kuka_q,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
+            time.sleep(0.1)
         animation_env.viz.StopRecording()
         animation_env.viz.PublishRecording()
         #stop recording 
