@@ -1,7 +1,7 @@
 from kuka_sim import RRT, TreeNode
 import numpy as np
 class RRT_tools:
-    def __init__(self, problem, root_node: str):
+    def __init__(self, problem, root_node: str="start"):
         # rrt is a tree 
         assert root_node == "start" or root_node == "goal"
         if root_node == "start":
@@ -42,7 +42,7 @@ class RRT_tools:
 
         l2_distance = np.linalg.norm(np.array(node.value)-np.array(self.problem.goal))
         #print(l2_distance)
-        if l2_distance < 0.001:
+        if l2_distance == 0:
             return True
         return False
     
