@@ -201,7 +201,6 @@ class KukaRRTPlanner():
                     rrt_connect_solution = backup_path(start_to_goal_rrt_tools,connecting_node,goal_to_start_rrt_tools,newest_child_node)
             iters += 1
             logger.monitor_RRT_size()
-        print("found path!")
         return rrt_connect_solution
     
     def rrt_planning(self,problem, logger, max_iterations=50e3, prob_sample_q_goal=.05):
@@ -253,12 +252,11 @@ class KukaRRTPlanner():
             rrt_solution: list of configuration vectors 
             total_trajectory_time: time to move between start and goal configuration
         Output:
-            trajectory: (function(x)) function that returns the interpolated configuration vector from  0<=t<=total_trajectory_time 
+            trajectory: drake:PiecewisePolynomial cubic spline time-parameterized interpolation 
+            between all configurations in rrt_solution
         """
         x = np.linspace(0, total_trajectory_time,len(rrt_solution))
         y = np.array(rrt_solution)
-        print(len(x))
-        print(y.shape)
         start_vel = np.zeros(len(rrt_solution[0]))
         end_vel = np.zeros(len(rrt_solution[0]))
         trajectory = PiecewisePolynomial.CubicWithContinuousSecondDerivatives(x,y.T,start_vel,end_vel)
@@ -282,8 +280,9 @@ class KukaRRTPlanner():
                 for end_node in rrt_path_DAG_nodes[idx+2:]:
                     start_config = node.value
                     end_config = end_node.value 
-                    path_is_coll_free = self.iiwa_problem.test_path(start_config,end_config)
-                    if path_is_coll_free:
+                    coll_free_path = self.iiwa_problem.safe_path(start_config,end_config)
+                    final_coll_free_config = coll_free_path[-1]
+                    if final_coll_free_config == end_config:
                         node.add_child_node(end_node)
             return rrt_path_DAG
 
@@ -303,9 +302,11 @@ class KukaRRTPlanner():
             #return path 
             min_cost_path = []
             node = dag_graph.node_sequence[-1]
+            print(f"optimized path cost: {node.tentative_path_cost}")
             while node.parent_node is not None:
                 min_cost_path.append(node.value)
                 node = node.parent_node
+            min_cost_path.append(dag_graph.node_sequence[0].value)
             min_cost_path.reverse()
             print(f"length of optimized path: {len(min_cost_path)}")
             return min_cost_path
@@ -315,6 +316,18 @@ class KukaRRTPlanner():
         end = time.time()
         print(f"time spent to optimize path: {end-start}s")
         return optimized_rrt_path
+    @staticmethod
+    def check_path_cost(path):
+        """
+        
+        """
+        assert(len(path)>=2)
+        cumulative_path_cost = 0
+        for idx, config in enumerate(path[:-1]):
+            next_config = path[idx+1]
+            dist_between_config = np.linalg.norm(np.array(next_config)-np.array(config))
+            cumulative_path_cost+=dist_between_config
+        return cumulative_path_cost
 
 
     def render_RRT_Solution(self,rrt_solution: list):
@@ -350,12 +363,12 @@ class KukaRRTPlanner():
 class PathDAG():
     def __init__(self,rrt_path) -> None:
         self.node_sequence = []
-        #build linked list from start config to end config
+        #construct initial linked list in order of start config to end config
         for config in rrt_path:
             dag_node = PathDAGNode(config)
             self.node_sequence.append(dag_node)
         for idx, node in enumerate(self.node_sequence[:-1]):
-            #set parent relationships
+            #set parent pointers
             node.child_nodes.append(self.node_sequence[idx+1])
             self.node_sequence[idx+1].parent_node = node
         start_dag_node = self.node_sequence[0]
@@ -371,12 +384,18 @@ class PathDAGNode():
     def add_child_node(self,child_node):
         self.child_nodes.append(child_node)
 kuka_rrt = KukaRRTPlanner()
-start_time = time.time()
 logger = RRTAnalysis()
+start_rrt = time.time()
 path_to_goal = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger)
+end_rrt = time.time()
+original_path_cost = kuka_rrt.check_path_cost(path_to_goal)
+print(f"unoptimized path cost: {original_path_cost}")
+print(f"time spent for rrt connect: {end_rrt - start_rrt}s")
 better_path = kuka_rrt.post_process_rrt_path(path_to_goal)
+print(better_path[0])
+assert(np.array_equal(np.array(better_path[0]),kuka_rrt.q_start))
+assert(np.array_equal(np.array(better_path[-1]),kuka_rrt.q_goal))
 end_time = time.time()
-print(f"time taken: {end_time - start_time}")
 kuka_rrt.render_RRT_Solution(better_path)
 # plt.plot(logger.time_log,logger.start_to_goal_tree_size_log)
 # plt.show()
