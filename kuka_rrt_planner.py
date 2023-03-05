@@ -4,7 +4,8 @@ import random
 import time
 import scipy.interpolate
 import numpy as np
-import matplotlib.pyplot as plt 
+import matplotlib.pyplot as plt
+from pydrake.all import PiecewisePolynomial 
 class RRTAnalysis():
     def __init__(self) -> None:
         self.start_to_goal_tree = None
@@ -244,7 +245,8 @@ class KukaRRTPlanner():
         if len(rrt_solution) == 0:
             print("No solution was found within iteration limit")
         return rrt_solution
-    def make_RRT_trajectory(self, rrt_solution: list, total_trajectory_time: int):
+    @staticmethod
+    def make_RRT_trajectory(rrt_solution: list, total_trajectory_time: int):
         """
         Constructs trajectory from list of configurations returned by the RRT algorithm 
         Input:
@@ -255,8 +257,66 @@ class KukaRRTPlanner():
         """
         x = np.linspace(0, total_trajectory_time,len(rrt_solution))
         y = np.array(rrt_solution)
-        trajectory = scipy.interpolate.interp1d(x, y.T)
+        print(len(x))
+        print(y.shape)
+        start_vel = np.zeros(len(rrt_solution[0]))
+        end_vel = np.zeros(len(rrt_solution[0]))
+        trajectory = PiecewisePolynomial.CubicWithContinuousSecondDerivatives(x,y.T,start_vel,end_vel)
         return trajectory 
+    def post_process_rrt_path(self,rrt_solution: list):
+        """
+        Reduce the number of configurations in the RRT path when possible to find the minimal distance RRT path from start to goal 
+        """
+        start = time.time()
+        initial_path = rrt_solution
+        def find_all_shortcuts():
+            """
+            Tests collisions between all pairs of RRT configurations and builds the linked list DAG  
+            """
+
+            q_start = initial_path[0]
+            print(f"length of initial path: {len(initial_path)}")
+            rrt_path_DAG = PathDAG(initial_path)
+            rrt_path_DAG_nodes = rrt_path_DAG.node_sequence
+            for idx, node in enumerate(rrt_path_DAG_nodes[:-2]):
+                for end_node in rrt_path_DAG_nodes[idx+2:]:
+                    start_config = node.value
+                    end_config = end_node.value 
+                    path_is_coll_free = self.iiwa_problem.test_path(start_config,end_config)
+                    if path_is_coll_free:
+                        node.add_child_node(end_node)
+            return rrt_path_DAG
+
+        def SSSP(dag_graph):
+            """
+            Finds shortest path on a DAG
+            """
+            for node in dag_graph.node_sequence: 
+                for child_node in node.child_nodes:
+                    parent_node_config = np.array(node.value)
+                    child_node_config = np.array(child_node.value)
+                    distance = np.linalg.norm(parent_node_config-child_node_config)
+                    if node.tentative_path_cost + distance < child_node.tentative_path_cost:
+                        child_node.tentative_path_cost = node.tentative_path_cost + distance
+                        child_node.parent_node = node
+            
+            #return path 
+            min_cost_path = []
+            node = dag_graph.node_sequence[-1]
+            while node.parent_node is not None:
+                min_cost_path.append(node.value)
+                node = node.parent_node
+            min_cost_path.reverse()
+            print(f"length of optimized path: {len(min_cost_path)}")
+            return min_cost_path
+        
+        path_dag = find_all_shortcuts()
+        optimized_rrt_path = SSSP(path_dag)
+        end = time.time()
+        print(f"time spent to optimize path: {end-start}s")
+        return optimized_rrt_path
+
+
     def render_RRT_Solution(self,rrt_solution: list):
         """
         Animate RRT path 
@@ -279,7 +339,7 @@ class KukaRRTPlanner():
         animation_env.viz.StartRecording(set_transforms_while_recording = False)
         while t <= time_end:
             #update configuration 
-            current_configuration = config_space_trajectory(t)
+            current_configuration = config_space_trajectory.value(t)
             animation_env.station.GetInputPort("iiwa_position").FixValue(animation_env.context_station,current_configuration)           
             t+=dt 
             sim.AdvanceTo(t)
@@ -287,15 +347,38 @@ class KukaRRTPlanner():
         animation_env.viz.StopRecording()
         animation_env.viz.PublishRecording()
         #stop recording 
-    
+class PathDAG():
+    def __init__(self,rrt_path) -> None:
+        self.node_sequence = []
+        #build linked list from start config to end config
+        for config in rrt_path:
+            dag_node = PathDAGNode(config)
+            self.node_sequence.append(dag_node)
+        for idx, node in enumerate(self.node_sequence[:-1]):
+            #set parent relationships
+            node.child_nodes.append(self.node_sequence[idx+1])
+            self.node_sequence[idx+1].parent_node = node
+        start_dag_node = self.node_sequence[0]
+        start_dag_node.tentative_path_cost = 0
+class PathDAGNode():
+    def __init__(self,config) -> None:
+        self.value = config
+        self.parent_node = None
+        self.child_nodes = [] 
+        self.tentative_path_cost = np.inf
+    def set_parent_node(self,parent_node):
+        self.parent_node = parent_node
+    def add_child_node(self,child_node):
+        self.child_nodes.append(child_node)
 kuka_rrt = KukaRRTPlanner()
 start_time = time.time()
 logger = RRTAnalysis()
 path_to_goal = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger)
+better_path = kuka_rrt.post_process_rrt_path(path_to_goal)
 end_time = time.time()
 print(f"time taken: {end_time - start_time}")
-kuka_rrt.render_RRT_Solution(path_to_goal)
-plt.plot(logger.time_log,logger.start_to_goal_tree_size_log)
-plt.show()
-plt.plot(logger.time_log,logger.goal_to_start_tree_size_log)
-plt.show()
+kuka_rrt.render_RRT_Solution(better_path)
+# plt.plot(logger.time_log,logger.start_to_goal_tree_size_log)
+# plt.show()
+# plt.plot(logger.time_log,logger.goal_to_start_tree_size_log)
+# plt.show()
