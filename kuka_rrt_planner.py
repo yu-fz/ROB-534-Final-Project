@@ -259,7 +259,7 @@ class KukaRRTPlanner():
         y = np.array(rrt_solution)
         start_vel = np.zeros(len(rrt_solution[0]))
         end_vel = np.zeros(len(rrt_solution[0]))
-        trajectory = PiecewisePolynomial.CubicWithContinuousSecondDerivatives(x,y.T,start_vel,end_vel)
+        trajectory = PiecewisePolynomial.FirstOrderHold(x,y.T)
         return trajectory 
     def post_process_rrt_path(self,rrt_solution: list):
         """
@@ -345,7 +345,7 @@ class KukaRRTPlanner():
         diagram_context = animation_env.context_diagram
         t = 0 
         time_end = 10
-        dt = 0.01
+        dt = 0.001
         config_space_trajectory = self.make_RRT_trajectory(rrt_solution,time_end)
         sim = Simulator(diagram, diagram_context)
         animation_env.station.GetInputPort("wsg_position").FixValue(animation_env.context_station,self.gripper_setpoint)
@@ -356,7 +356,6 @@ class KukaRRTPlanner():
             animation_env.station.GetInputPort("iiwa_position").FixValue(animation_env.context_station,current_configuration)           
             t+=dt 
             sim.AdvanceTo(t)
-
         animation_env.viz.StopRecording()
         animation_env.viz.PublishRecording()
         #stop recording 
@@ -391,12 +390,11 @@ end_rrt = time.time()
 original_path_cost = kuka_rrt.check_path_cost(path_to_goal)
 print(f"unoptimized path cost: {original_path_cost}")
 print(f"time spent for rrt connect: {end_rrt - start_rrt}s")
-better_path = kuka_rrt.post_process_rrt_path(path_to_goal)
-print(better_path[0])
-assert(np.array_equal(np.array(better_path[0]),kuka_rrt.q_start))
-assert(np.array_equal(np.array(better_path[-1]),kuka_rrt.q_goal))
+path_to_goal = kuka_rrt.post_process_rrt_path(path_to_goal)
+assert(np.array_equal(np.array(path_to_goal[0]),kuka_rrt.q_start))
+assert(np.array_equal(np.array(path_to_goal[-1]),kuka_rrt.q_goal))
 end_time = time.time()
-kuka_rrt.render_RRT_Solution(better_path)
+kuka_rrt.render_RRT_Solution(path_to_goal)
 # plt.plot(logger.time_log,logger.start_to_goal_tree_size_log)
 # plt.show()
 # plt.plot(logger.time_log,logger.goal_to_start_tree_size_log)

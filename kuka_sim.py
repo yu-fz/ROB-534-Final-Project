@@ -1,6 +1,6 @@
 import time
 from random import random
-
+from math import ceil, sqrt
 import numpy as np
 from manipulation import running_as_notebook, FindResource
 from manipulation.exercises.trajectories.rrt_planner.robot import (
@@ -12,16 +12,21 @@ from manipulation.scenarios import MakeManipulationStation
 from pydrake.all import (DiagramBuilder, FindResourceOrThrow,
                          MeshcatVisualizer, MultibodyPlant, Parser,
                          RigidTransform, RollPitchYaw, RotationMatrix,
-                         Simulator, SolutionResult, Solve, StartMeshcat)
+                         Simulator, SolutionResult, Solve, StartMeshcat, MeshcatVisualizerParams)
 from pydrake.multibody import inverse_kinematics
 from scipy.spatial import KDTree 
+from pydrake.geometry import (
+    DrakeVisualizer,
+    DrakeVisualizerParams,
+    Role, Rgba
+)
+from pydrake.all import PiecewisePolynomial 
 
 class ManipulationStationSim:
     def __init__(self, meshcat, is_visualizing=False):
         builder = DiagramBuilder()
         self.station = builder.AddSystem(
-            MakeManipulationStation(filename=FindResource(
-                "models/manipulation_station_with_cupboard.dmd.yaml"),
+            MakeManipulationStation(filename="./manipulation_station_with_cupboard.dmd.yaml",
                                     time_step=1e-3))
         self.plant = self.station.GetSubsystemByName("plant")
         self.scene_graph = self.station.GetSubsystemByName("scene_graph")
@@ -30,13 +35,28 @@ class ManipulationStationSim:
 
         # scene graph query output port.
         self.query_output_port = self.scene_graph.GetOutputPort("query")
-
+        self._collision_params = MeshcatVisualizerParams(
+            role=Role.kProximity,
+            prefix="collision",
+            default_color=Rgba(0.8, 0.5, 0.2, 0.3),
+            enable_alpha_slider=True
+        )
+        self._illustration_params = MeshcatVisualizerParams(
+            role=Role.kIllustration,
+            prefix="illustration",
+            default_color=Rgba(0.9, 0.9, 0.9, 0.8),
+            enable_alpha_slider=True
+        )
         # meshcat visualizer
         if is_visualizing:
             self.viz = MeshcatVisualizer.AddToBuilder(
                 builder,
                 self.station.GetOutputPort("query_object"),
-                self.meshcat)
+                self.meshcat,self._illustration_params)
+            MeshcatVisualizer.AddToBuilder(
+                builder,
+                self.station.GetOutputPort("query_object"),
+                self.meshcat,self._collision_params)
 
         self.diagram = builder.Build()
 
@@ -98,6 +118,38 @@ class ManipulationStationSim:
 
         return len(collision_paris) > 0
 
+class ConfigurationSpaceCubicInterp(ConfigurationSpace):
+    def __init__(self, cspace_ranges, robot_distance, max_steps):
+        super().__init__(cspace_ranges, robot_distance, max_steps)
+    def path(self, one: tuple, two: tuple):  # linear interpolation
+        assert self.valid_configuration(one) and self.valid_configuration(two)
+        diffs = [
+            self.cspace_ranges[i].difference(one[i], two[i])
+            for i in range(len(self.cspace_ranges))
+        ]
+        samples = max([
+            int(ceil(abs(diff) / max_diff))
+            for diff, max_diff in zip(diffs, self.max_diff_on_path)
+        ])
+        samples = max(2, samples)
+        path = [one]
+        start_vel = np.zeros(len(one))
+        end_vel = np.zeros(len(two))
+        if samples == 2:
+            return path + [two]
+        else:
+            x = np.array([1,samples-1])
+            configurations = np.array([one,two])
+            cubic_interpolation = PiecewisePolynomial.FirstOrderHold(x,configurations.T)
+            for s in range(1, samples - 1):
+                
+                sample = cubic_interpolation.value(s)
+                sample = np.squeeze(sample)
+                sample_list = sample.tolist()
+                #  return path
+                #print(s)
+                path.append(tuple(sample_list))
+            return path + [two]
 class IiwaProblem(Problem):
     def __init__(self,
                  q_start: np.array,
@@ -135,7 +187,7 @@ class IiwaProblem(Problem):
             return np.sqrt(sum)
 
         max_steps = nq * [np.pi / 180 * 2]  # three degrees
-        cspace_iiwa = ConfigurationSpace(range_list, l2_distance, max_steps)
+        cspace_iiwa = ConfigurationSpaceCubicInterp(range_list, l2_distance, max_steps)
 
         # Call base class constructor.
         Problem.__init__(
@@ -171,7 +223,7 @@ class IKSolver(object):
         plant_iiwa = MultibodyPlant(0.0)
         iiwa_file = FindResourceOrThrow(
         "drake/manipulation/models/iiwa_description/iiwa7/"
-        "iiwa7_no_collision.sdf")
+        "iiwa7_with_box_collision.sdf")
         iiwa = Parser(plant_iiwa).AddModelFromFile(iiwa_file)
         # Define frames
         world_frame = plant_iiwa.world_frame()
