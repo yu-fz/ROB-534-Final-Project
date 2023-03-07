@@ -117,39 +117,7 @@ class ManipulationStationSim:
         collision_paris = query_object.ComputePointPairPenetration()
 
         return len(collision_paris) > 0
-
-class ConfigurationSpaceCubicInterp(ConfigurationSpace):
-    def __init__(self, cspace_ranges, robot_distance, max_steps):
-        super().__init__(cspace_ranges, robot_distance, max_steps)
-    def path(self, one: tuple, two: tuple):  # linear interpolation
-        assert self.valid_configuration(one) and self.valid_configuration(two)
-        diffs = [
-            self.cspace_ranges[i].difference(one[i], two[i])
-            for i in range(len(self.cspace_ranges))
-        ]
-        samples = max([
-            int(ceil(abs(diff) / max_diff))
-            for diff, max_diff in zip(diffs, self.max_diff_on_path)
-        ])
-        samples = max(2, samples)
-        path = [one]
-        start_vel = np.zeros(len(one))
-        end_vel = np.zeros(len(two))
-        if samples == 2:
-            return path + [two]
-        else:
-            x = np.array([1,samples-1])
-            configurations = np.array([one,two])
-            cubic_interpolation = PiecewisePolynomial.FirstOrderHold(x,configurations.T)
-            for s in range(1, samples - 1):
-                
-                sample = cubic_interpolation.value(s)
-                sample = np.squeeze(sample)
-                sample_list = sample.tolist()
-                #  return path
-                #print(s)
-                path.append(tuple(sample_list))
-            return path + [two]
+    
 class IiwaProblem(Problem):
     def __init__(self,
                  q_start: np.array,
@@ -187,7 +155,7 @@ class IiwaProblem(Problem):
             return np.sqrt(sum)
 
         max_steps = nq * [np.pi / 180 * 2]  # three degrees
-        cspace_iiwa = ConfigurationSpaceCubicInterp(range_list, l2_distance, max_steps)
+        cspace_iiwa = ConfigurationSpace(range_list, l2_distance, max_steps)
 
         # Call base class constructor.
         Problem.__init__(
