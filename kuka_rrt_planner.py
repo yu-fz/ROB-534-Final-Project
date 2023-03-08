@@ -211,48 +211,6 @@ class KukaRRTPlanner():
             logger.monitor_RRT_size()
         return rrt_connect_solution
 
-    def rrt_planning(self,problem, logger, max_iterations=50e3, prob_sample_q_goal=.2):
-        """
-        Input:
-            problem (IiwaProblem): instance of a utility class
-            max_iterations: the maximum number of samples to be collected
-            prob_sample_q_goal: the probability of sampling q_goal
-
-        Output:
-            path (list): [q_start, ...., q_goal].
-                        Note q's are configurations, not RRT nodes
-        """
-        print("running RRT with prob sample q goal", prob_sample_q_goal)
-        rrt_tools = RRT_tools(self.iiwa_problem)
-        q_goal = problem.goal
-        q_start = problem.start
-        RUN_RRT = True
-        iters = 0
-        rrt_solution = []
-        logger = RRTAnalysis()
-        logger.register_RRT_algo(rrt_tools)
-        while RUN_RRT and iters < max_iterations:
-            #sample goal with prob p:
-            rand_num = random.random()
-            if rand_num < prob_sample_q_goal:
-                new_configuration_space_sample = q_goal
-            else:
-            #else sample random point in cspace
-                new_configuration_space_sample = rrt_tools.sample_node_in_configuration_space()
-
-            rrt_tools, new_child_node = self.rrt_extend_operation(new_configuration_space_sample,rrt_tools, logger)
-            logger.monitor_RRT_size()
-            #Check if the new node is within tolerance to goal
-            if rrt_tools.node_reaches_goal(node=new_child_node):
-                print("Found Goal!")
-                #We're done, now backup to get the path
-                rrt_solution = rrt_tools.backup_path_from_node(new_child_node)
-                RUN_RRT = False
-            iters += 1
-        if len(rrt_solution) == 0:
-            print("No solution was found within iteration limit")
-        return rrt_solution
-
     @staticmethod
     def make_RRT_trajectory(rrt_solution: list, total_trajectory_time: int):
         """
@@ -294,30 +252,32 @@ class KukaRRTPlanner():
                     coll_free_path = self.iiwa_problem.safe_path(start_config,
                                                                  end_config)
                     final_coll_free_config = coll_free_path[-1]
-                    if np.linalg.norm(final_coll_free_config - end_config) < 1e-6:
+                    #if np.linalg.norm(final_coll_free_config - end_config) < 1e-6:
+                    if np.array_equal(final_coll_free_config, end_config):
                         node.add_child_node(j)
             return rrt_path_DAG
-
-        def path_cost(seq):
-            assert len(seq) > 1
-            total = 0
-            for t, t1 in zip(seq[:-1], seq[1:]):
-                total += np.linalg.norm(t - t1)
-            return total
 
         def SSSP(dag_graph):
             """
             Finds shortest path on a DAG
             """
-            for node in dag_graph.node_sequence:
+
+            min_cost_path1, cost1 = astar(dag_graph)
+            print(f'a* postprocessed cost {self.check_path_cost(min_cost_path1):.4f}')
+            print(f"a* length of postprocessed path: {len(min_cost_path1)}")
+
+            for i, node in enumerate(dag_graph.node_sequence):
                 for j in node.child_nodes:
                     child_node = dag_graph.node_sequence[j]
                     parent_node_config = np.array(node.value)
                     child_node_config = np.array(child_node.value)
                     distance = np.linalg.norm(parent_node_config - child_node_config)
+                    #print(f"Parent {i} child {j} shortcut: {node.tentative_path_cost} + {distance} < {child_node.tentative_path_cost}")
                     if node.tentative_path_cost + distance < child_node.tentative_path_cost:
                         child_node.tentative_path_cost = node.tentative_path_cost + distance
                         child_node.parent_node = node
+                        #print(f"found a shortcut!")
+                        #input()
 
             min_cost_path2 = []
             node = dag_graph.node_sequence[-1]
@@ -326,14 +286,10 @@ class KukaRRTPlanner():
                 node = node.parent_node
             min_cost_path2.append(dag_graph.node_sequence[0].value)
             min_cost_path2.reverse()
-            print(f"cost of original postprocess approach {path_cost(min_cost_path2):.4f}")
+            print(f"cost of original postprocess approach {self.check_path_cost(min_cost_path2):.4f}")
             print(f"length of original postprocess approach path: {len(min_cost_path2)}")
 
-            min_cost_path1, cost1 = astar(dag_graph)
-            print(f'a* postprocessed cost {path_cost(min_cost_path1):.4f}')
-            print(f"a* length of postprocessed path: {len(min_cost_path1)}")
-
-            return min_cost_path1
+            return min_cost_path2
 
         path_dag = find_all_shortcuts()
         optimized_rrt_path = SSSP(path_dag)
@@ -400,6 +356,7 @@ class PathDAG():
             self.node_sequence[idx+1].parent_node = node
 
         start_dag_node = self.node_sequence[0]
+        start_dag_node.tentative_path_cost = 0
 
 
 class PathDAGNode():
@@ -416,9 +373,7 @@ class PathDAGNode():
         self.child_nodes.append(child_node)
 
 
-def astar(graph: PathDAG,
-          epsilon: float = 1.0,
-) -> list:
+def astar(graph: PathDAG) -> list:
     from priority_queue import PriorityQueue
     # This is the open set, a priority queue used to decide which
     # nodes should be expanded next
@@ -454,13 +409,13 @@ def astar(graph: PathDAG,
 
             dist = np.linalg.norm(node.value - neighbor.value)
             local_start_to_node_cost = start_to_node_cost[current] + dist
-            if neighbor not in start_to_node_cost or \
-                    local_start_to_node_cost < start_to_node_cost[neighbor]:
+            if j not in start_to_node_cost or \
+                    local_start_to_node_cost < start_to_node_cost[j]:
 
                 start_to_node_cost[j] = local_start_to_node_cost
                 node_parent[j] = current
                 heuristic_node_cost = local_start_to_node_cost + \
-                   float(np.linalg.norm(neighbor.value - graph.node_sequence[-1].value))
+                   0.00 * float(np.linalg.norm(neighbor.value - graph.node_sequence[-1].value))
 
                 if not open_nodes.test(j):
                     open_nodes.insert(j, priority=heuristic_node_cost)
@@ -484,6 +439,7 @@ if __name__ == '__main__':
         print(f"Start did not match, {np.linalg.norm(np.array(path_to_goal[-1]) - kuka_rrt.q_goal):.6f}")
     end_time = time.time()
     kuka_rrt.render_RRT_Solution(path_to_goal)
+
 # plt.plot(logger.time_log,logger.start_to_goal_tree_size_log)
 # plt.show()
 # plt.plot(logger.time_log,logger.goal_to_start_tree_size_log)
