@@ -39,13 +39,11 @@ class ManipulationStationSim:
             role=Role.kProximity,
             prefix="collision",
             default_color=Rgba(0.8, 0.5, 0.2, 0.3),
-            enable_alpha_slider=True
         )
         self._illustration_params = MeshcatVisualizerParams(
             role=Role.kIllustration,
             prefix="illustration",
             default_color=Rgba(0.9, 0.9, 0.9, 0.8),
-            enable_alpha_slider=True
         )
         # meshcat visualizer
         if is_visualizing:
