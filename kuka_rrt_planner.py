@@ -240,7 +240,7 @@ class KukaRRTPlanner():
                     costs += [self.check_path_cost(seq)]
             iters += 1
             logger.monitor_RRT_size()
-        print(f"\n\nConsidered {len(solutions)} possible solutions. Worst solution had cost {max(costs):.4f} while best had {min(costs):.4f}\n\n")
+        #print(f"\n\nConsidered {len(solutions)} possible solutions. Worst solution had cost {max(costs):.4f} while best had {min(costs):.4f}\n\n")
         return solutions[np.argmin(costs)]
         #return rrt_connect_solution
 
@@ -299,9 +299,9 @@ class KukaRRTPlanner():
             min_cost_path1, cost1 = astar(dag_graph)
             cost1 = self.check_path_cost(min_cost_path1)
             astar_tf = time.time()
-            print(f'a* postprocessed cost {self.check_path_cost(min_cost_path1):.4f}')
-            print(f"a* length of postprocessed path: {len(min_cost_path1)}")
-            print(f"a* time {astar_tf - astar_t0:.5f}s")
+            #print(f'a* postprocessed cost {self.check_path_cost(min_cost_path1):.4f}')
+            #print(f"a* length of postprocessed path: {len(min_cost_path1)}")
+            #print(f"a* time {astar_tf - astar_t0:.5f}s")
 
             t0 = time.time()
             for i, node in enumerate(dag_graph.node_sequence):
@@ -328,19 +328,19 @@ class KukaRRTPlanner():
             tf = time.time()
 
             assert len(min_cost_path2) == len(min_cost_path1) and cost1 == cost2
-            print(f"cost of original postprocess approach {self.check_path_cost(min_cost_path2):.4f}")
-            print(f"length of original postprocess approach path: {len(min_cost_path2)}")
-            print(f"postprocess time {tf-t0:.5f}s")
+            #print(f"cost of original postprocess approach {self.check_path_cost(min_cost_path2):.4f}")
+            #print(f"length of original postprocess approach path: {len(min_cost_path2)}")
+            #print(f"postprocess time {tf-t0:.5f}s")
 
-            return min_cost_path2
+            return min_cost_path1
 
         t0 = time.time()
         path_dag = find_all_shortcuts()
         tf = time.time()
-        print(f"{tf - t0:.5f}s to find all shortcuts")
+        #print(f"{tf - t0:.5f}s to find all shortcuts")
         optimized_rrt_path = SSSP(path_dag)
         end = time.time()
-        print(f"time spent to optimize path: {end-start}s")
+        #print(f"time spent to optimize path: {end-start}s")
         return optimized_rrt_path
 
     @staticmethod
