@@ -14,13 +14,13 @@ from pydrake.all import (DiagramBuilder, FindResourceOrThrow,
                          RigidTransform, RollPitchYaw, RotationMatrix,
                          Simulator, SolutionResult, Solve, StartMeshcat, MeshcatVisualizerParams)
 from pydrake.multibody import inverse_kinematics
-from scipy.spatial import KDTree 
+from scipy.spatial import KDTree
 from pydrake.geometry import (
     DrakeVisualizer,
     DrakeVisualizerParams,
     Role, Rgba
 )
-from pydrake.all import PiecewisePolynomial 
+from pydrake.all import PiecewisePolynomial
 
 class ManipulationStationSim:
     def __init__(self, meshcat, is_visualizing=False):
@@ -115,7 +115,7 @@ class ManipulationStationSim:
         collision_paris = query_object.ComputePointPairPenetration()
 
         return len(collision_paris) > 0
-    
+
 class IiwaProblem(Problem):
     def __init__(self,
                  q_start: np.array,
@@ -285,14 +285,14 @@ class RRT:
         assert self.cspace.valid_configuration(configuration)
         # Take all c-space vector keys in configurations dict and convert it to np array
         configuration_vectors = list(self.configurations_dict.keys())
-        # convert list of configuration vectors to np array 
-        all_configurations = np.array(configuration_vectors) 
-        # Build KD-tree 
+        # convert list of configuration vectors to np array
+        all_configurations = np.array(configuration_vectors)
+        # Build KD-tree
         config_kd_tree = KDTree(all_configurations)
         distance, index = config_kd_tree.query(x=configuration,k=1) #query KD tree for nearest neighbor
-        # find which node is the nearest neighbor by querying the configurations dictionary 
+        # find which node is the nearest neighbor by querying the configurations dictionary
         closest = self.configurations_dict[configuration_vectors[index]]
-        return closest, distance 
+        return closest, distance
 
     # Brute force nearest, handles general distance functions
     def nearest(self, configuration):

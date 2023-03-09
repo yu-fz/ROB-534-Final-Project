@@ -56,18 +56,32 @@ class RRTAnalysis():
 
 
 class KukaRRTPlanner():
-    def __init__(self) -> None:
+    def __init__(self, hard: bool = False) -> None:
+        hard = True
         is_visualizing = True
+
         self.R_WG = RotationMatrix(np.array([[0,1,0], [1,0,0], [0,0,-1]]).T)
+        #self.R0 = RotationMatrix(np.array([[1,0,0], [0,1,0], [0,0,1]]).T)
         #Goal outside shelf
         #self.T_WG_goal = RigidTransform(p=np.array([4.69565839e-01, 2.95894043e-16, 0.65]), R=self.R_WG)
+
         #Goal inside shelf
-        self.T_WG_goal = RigidTransform(p=np.array([8.19565839e-01, 2.95894043e-16, 0.65]), R=self.R_WG)
+        #self.T0 = RigidTransform(p=np.array([0.3, 0, 0.65]), R=self.R0)
+        self.T_WG_1 = RigidTransform(p=np.array([0.82, 0, 0.65]), R=self.R_WG)
+        self.T_WG_2 = RigidTransform(p=np.array([0.82, 0, 0.15]), R=self.R_WG)
         self.meshcat = StartMeshcat()
         self.env = ManipulationStationSim(self.meshcat,is_visualizing)
         self.q_start = self.env.q0
         ik_solver = IKSolver()
-        self.q_goal, optimal = ik_solver.solve(self.T_WG_goal, q_guess=self.q_start)
+        q1, _ = ik_solver.solve(self.T_WG_1, q_guess=self.q_start)
+        #q1, _ = ik_solver.solve(self.T0, q_guess=self.q_start)
+        q2, _ = ik_solver.solve(self.T_WG_2, q_guess=self.q_start)
+        if hard:
+            self.q_start = q1
+            self.q_goal = q2
+        else:
+            self.q_start = self.env.q0
+            self.q_goal = q1
         self.gripper_setpoint = 0.1
         self.door_angle = np.pi/2 - 0.001
         self.left_door_angle = -np.pi/2
@@ -81,7 +95,11 @@ class KukaRRTPlanner():
             right_door_angle=self.right_door_angle,
             meshcat = self.meshcat,
             is_visualizing=is_visualizing)
-        AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=self.T_WG_goal, opacity=.5)
+        if hard:
+            AddMeshcatTriad(self.meshcat, 'start pose', X_PT=self.T_WG_1, opacity=.5)
+            AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=self.T_WG_2, opacity=.5)
+        else:
+            AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=self.T_WG_1, opacity=.5)
         self.env.DrawStation(self.q_start,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
 
     def _start_meshcat_vis(self):
@@ -108,6 +126,7 @@ class KukaRRTPlanner():
         feasible_path = rrt.calc_intermediate_qs_wo_collision(nearest_neighbor_node.value,new_q_sample)
         #Pick the configuration space point as far as possible in direction of sample
         idx = -1 # 1 if len(feasible_path) > 1 else 0
+        #idx = np.random.choice(range(max(1, len(feasible_path)//3)))
         furthest_safe_q = feasible_path[idx]
         new_child_node = rrt.grow_rrt_tree(parent_node=nearest_neighbor_node, q_sample=furthest_safe_q)
         #add new node to dict for kd-tree
@@ -138,7 +157,7 @@ class KukaRRTPlanner():
         else:
             return False, None
 
-    def rrt_connect_planning(self, problem, logger, max_iterations=10e3, prob_sample_q_endpoints=0.05,):
+    def rrt_connect_planning(self, problem, logger, max_iterations=10e3, prob_sample_q_endpoints=0.05, return_first: bool = False):
         """
         Input:
             problem (IiwaProblem): instance of a utility class
@@ -158,6 +177,10 @@ class KukaRRTPlanner():
         rrt_connect_solution = []
         connecting_node = None
         logger.register_RRT_Connect_algo(start_to_goal_rrt_tools,goal_to_start_rrt_tools)
+
+        solutions = []
+        costs = []
+
         def backup_path(rrt_A,rrt_A_child_node,rrt_B,rrt_B_child_node):
             """
             Function to back up two paths on the two RRT-connect trees and report the combined path from start to goal
@@ -168,6 +191,7 @@ class KukaRRTPlanner():
             rrt_B_solution.reverse()
             full_path = rrt_A_solution + rrt_B_solution
             return full_path
+
         while RUN_RRT and iters < max_iterations:
 
             if iters % 2 == 0:
@@ -185,8 +209,12 @@ class KukaRRTPlanner():
                 success, connecting_node = self.rrt_connect_operation(newest_child_node,
                                                                       goal_to_start_rrt_tools)
                 if success:
-                    RUN_RRT = False
-                    rrt_connect_solution = backup_path(start_to_goal_rrt_tools,newest_child_node,goal_to_start_rrt_tools,connecting_node)
+                    #RUN_RRT = False
+                    seq = backup_path(start_to_goal_rrt_tools,newest_child_node,goal_to_start_rrt_tools,connecting_node)
+                    if return_first:
+                        RUN_RRT = False
+                    solutions += [seq]
+                    costs += [self.check_path_cost(seq)]
 
             else:
                 # Extend tree from goal to start
@@ -205,11 +233,16 @@ class KukaRRTPlanner():
                                                                       start_to_goal_rrt_tools)
 
                 if success:
-                    RUN_RRT = False
-                    rrt_connect_solution = backup_path(start_to_goal_rrt_tools,connecting_node,goal_to_start_rrt_tools,newest_child_node)
+                    seq = backup_path(start_to_goal_rrt_tools,connecting_node,goal_to_start_rrt_tools,newest_child_node)
+                    if return_first:
+                        RUN_RRT = False
+                    solutions += [seq]
+                    costs += [self.check_path_cost(seq)]
             iters += 1
             logger.monitor_RRT_size()
-        return rrt_connect_solution
+        print(f"\n\nConsidered {len(solutions)} possible solutions. Worst solution had cost {max(costs):.4f} while best had {min(costs):.4f}\n\n")
+        return solutions[np.argmin(costs)]
+        #return rrt_connect_solution
 
     @staticmethod
     def make_RRT_trajectory(rrt_solution: list, total_trajectory_time: int):
@@ -262,10 +295,15 @@ class KukaRRTPlanner():
             Finds shortest path on a DAG
             """
 
+            astar_t0 = time.time()
             min_cost_path1, cost1 = astar(dag_graph)
+            cost1 = self.check_path_cost(min_cost_path1)
+            astar_tf = time.time()
             print(f'a* postprocessed cost {self.check_path_cost(min_cost_path1):.4f}')
             print(f"a* length of postprocessed path: {len(min_cost_path1)}")
+            print(f"a* time {astar_tf - astar_t0:.5f}s")
 
+            t0 = time.time()
             for i, node in enumerate(dag_graph.node_sequence):
                 for j in node.child_nodes:
                     child_node = dag_graph.node_sequence[j]
@@ -286,12 +324,20 @@ class KukaRRTPlanner():
                 node = node.parent_node
             min_cost_path2.append(dag_graph.node_sequence[0].value)
             min_cost_path2.reverse()
+            cost2 = self.check_path_cost(min_cost_path2)
+            tf = time.time()
+
+            assert len(min_cost_path2) == len(min_cost_path1) and cost1 == cost2
             print(f"cost of original postprocess approach {self.check_path_cost(min_cost_path2):.4f}")
             print(f"length of original postprocess approach path: {len(min_cost_path2)}")
+            print(f"postprocess time {tf-t0:.5f}s")
 
             return min_cost_path2
 
+        t0 = time.time()
         path_dag = find_all_shortcuts()
+        tf = time.time()
+        print(f"{tf - t0:.5f}s to find all shortcuts")
         optimized_rrt_path = SSSP(path_dag)
         end = time.time()
         print(f"time spent to optimize path: {end-start}s")
@@ -307,15 +353,15 @@ class KukaRRTPlanner():
         for idx, config in enumerate(path[:-1]):
             next_config = path[idx+1]
             dist_between_config = np.linalg.norm(np.array(next_config)-np.array(config))
-            cumulative_path_cost+=dist_between_config
+            cumulative_path_cost += dist_between_config
         return cumulative_path_cost
 
-    def render_RRT_Solution(self,rrt_solution: list):
+    def render_RRT_Solution(self, rrt_solution: list):
         """
         Animate RRT path
         """
         animation_env = ManipulationStationSim(self.meshcat,True)
-        animation_env.DrawStation(animation_env.q0,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
+        animation_env.DrawStation(rrt_solution[0], self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
         time.sleep(3)
         if len(rrt_solution) == 0:
             raise ValueError("path to animate cannot be empty.")
@@ -415,7 +461,7 @@ def astar(graph: PathDAG) -> list:
                 start_to_node_cost[j] = local_start_to_node_cost
                 node_parent[j] = current
                 heuristic_node_cost = local_start_to_node_cost + \
-                   0.00 * float(np.linalg.norm(neighbor.value - graph.node_sequence[-1].value))
+                   float(np.linalg.norm(neighbor.value - graph.node_sequence[-1].value))
 
                 if not open_nodes.test(j):
                     open_nodes.insert(j, priority=heuristic_node_cost)
@@ -433,10 +479,12 @@ if __name__ == '__main__':
     print(f"unoptimized path length: {len(path_to_goal)}")
     #print(f"time spent for rrt connect: {end_rrt - start_rrt:.1f}s")
     path_to_goal = kuka_rrt.post_process_rrt_path(path_to_goal)
+
     if not np.array_equal(np.array(path_to_goal[0]),kuka_rrt.q_start):
         print(f"Start did not match, {np.linalg.norm(np.array(path_to_goal[0]) - kuka_rrt.q_start):.6f}")
     if not np.array_equal(np.array(path_to_goal[-1]),kuka_rrt.q_goal):
         print(f"Start did not match, {np.linalg.norm(np.array(path_to_goal[-1]) - kuka_rrt.q_goal):.6f}")
+
     end_time = time.time()
     kuka_rrt.render_RRT_Solution(path_to_goal)
 
