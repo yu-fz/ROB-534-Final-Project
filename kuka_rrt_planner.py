@@ -56,9 +56,7 @@ class RRTAnalysis():
 
 
 class KukaRRTPlanner():
-    def __init__(self, hard: bool = True) -> None:
-        is_visualizing = True
-
+    def __init__(self, hard: bool = True, vis: bool = False) -> None:
         self.R_WG = RotationMatrix(np.array([[0,1,0], [1,0,0], [0,0,-1]]).T)
         #Goal outside shelf
         #self.T_WG_goal = RigidTransform(p=np.array([4.69565839e-01, 2.95894043e-16, 0.65]), R=self.R_WG)
@@ -67,8 +65,8 @@ class KukaRRTPlanner():
         #self.T0 = RigidTransform(p=np.array([0.3, 0, 0.65]), R=self.R0)
         self.T_WG_1 = RigidTransform(p=np.array([0.82, 0, 0.65]), R=self.R_WG)
         self.T_WG_2 = RigidTransform(p=np.array([0.82, 0, 0.15]), R=self.R_WG)
-        self.meshcat = StartMeshcat()
-        self.env = ManipulationStationSim(self.meshcat,is_visualizing)
+        self.meshcat = StartMeshcat() if vis else None
+        self.env = ManipulationStationSim(self.meshcat, is_visualizing=vis)
         self.q_start = self.env.q0
         ik_solver = IKSolver()
         q1, _ = ik_solver.solve(self.T_WG_1, q_guess=self.q_start)
@@ -91,23 +89,14 @@ class KukaRRTPlanner():
             left_door_angle=self.left_door_angle,
             right_door_angle=self.right_door_angle,
             meshcat = self.meshcat,
-            is_visualizing=is_visualizing)
-        if hard:
-            AddMeshcatTriad(self.meshcat, 'start pose', X_PT=self.T_WG_1, opacity=.5)
-            AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=self.T_WG_2, opacity=.5)
-        else:
-            AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=self.T_WG_1, opacity=.5)
-        self.env.DrawStation(self.q_start,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
-
-    def _start_meshcat_vis(self):
-        """
-        Starts meshcat instance
-        """
-        # Start the visualizer.
-        meshcat = StartMeshcat()
-        print("loading meshcat...")
-        time.sleep(2.5) #need to wait for meshcat server to initialize
-        return meshcat
+            is_visualizing=vis)
+        if vis:
+            if hard:
+                AddMeshcatTriad(self.meshcat, 'start pose', X_PT=self.T_WG_1, opacity=.5)
+                AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=self.T_WG_2, opacity=.5)
+            else:
+                AddMeshcatTriad(self.meshcat, 'goal pose', X_PT=self.T_WG_1, opacity=.5)
+            self.env.DrawStation(self.q_start,self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
 
     def rrt_extend_operation(self, new_q_sample, rrt: RRT_tools, logger: RRTAnalysis):
         """
@@ -190,7 +179,7 @@ class KukaRRTPlanner():
             return full_path
 
         while RUN_RRT and iters < max_iterations:
-            print(f"Iteration {iters} / {max_iterations}, {len(solutions)} solutions", end="\r")
+            #print(f"Iteration {iters} / {max_iterations}, {len(solutions)} solutions", end="\r")
 
             if iters % 2 == 0:
                 # Extend tree from start to goal

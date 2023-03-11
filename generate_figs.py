@@ -1,12 +1,36 @@
+import ray
 import time
 import numpy as np
 
 from kuka_rrt_planner import KukaRRTPlanner, RRTAnalysis
 
-TRIALS = 15
+
+@ray.remote
+def rrt_connect(*args, retry_failures: bool = False, **kwargs):
+    kuka_rrt = KukaRRTPlanner()
+    logger = RRTAnalysis()
+
+    failures = 0
+    while True:
+        try:
+            start = time.time()
+            path = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger, *args, **kwargs)
+            end = time.time()
+            return path, end - start, kuka_rrt.check_path_cost(path), failures
+        except ValueError:
+            if not retry_failures:
+                raise ValueError
+            failures += 1
+            print(f"Caught a failure, retrying...")
 
 
-def generate_table_1():
+def unused_cpus():
+    assert ray.is_initialized()
+    resources = ray.available_resources()
+    return int(resources['CPU'] if 'CPU' in resources else 0)
+
+
+def generate_table_1(trials: int = 15):
     print("Generating table 1...")
     def _make_algo_dict(name):
         return {name: {'time': [], 'cost': [], 'path length': []}}
@@ -92,59 +116,64 @@ def generate_table_2(trials: int = 10):
     print()
 
 
-def generate_fig_1(trials: int = 5):
+def generate_fig_1(trials: int = 20):
+    ray.init(num_cpus=8)
     print("Generating Figure 1...")
+    futs = {}
+    for max_iterations in [4e3, 5e3, 6e3, 7e3, 8e3, 9e3, 1e4]:#, 2e4, 3e4, 4e4, 5e4]:
+        futs[max_iterations] = []
+        for trial in range(trials):
+            start = time.time()
+            while unused_cpus() == 0:
+                time.sleep(1)
+
+            print(f"Dispatching job with max iters {max_iterations}...")
+            fut = rrt_connect.remote(max_iterations=max_iterations, return_first=False, retry_failures=True)
+            futs[max_iterations] += [fut]
+
     lengths = {}
     costs = {}
     times = {}
     failures = {}
-    for max_iterations in [5e3, 5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 2e4, 3e4, 4e4, 5e4]:
+    for max_iterations in futs:
         lengths[max_iterations] = []
         costs[max_iterations] = []
         times[max_iterations] = []
-        failures[max_iterations] = [0]
-        for trial in range(trials):
-            start = time.time()
-            kuka_rrt = KukaRRTPlanner()
-            logger = RRTAnalysis()
+        failures[max_iterations] = 0
+        for fut in futs[max_iterations]:
+            ret = ray.get(fut)
 
-            while True:
-                try:
-                    start = time.time()
-                    path_to_goal = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem,
-                                                                 logger,
-                                                                 max_iterations=max_iterations,
-                                                                 return_first=False)
-                    end = time.time()
-                    times[max_iterations] += [end - start]
-                    costs[max_iterations] += [kuka_rrt.check_path_cost(path_to_goal)]
-                    lengths[max_iterations] += [len(path_to_goal)]
-                    break
-                except ValueError:
-                    failures[max_iterations][-1] += 1
-                    print(f"RRT failed to solve, trying again...")
+            path, elapsed, cost, fails = ret
+            times[max_iterations] += [elapsed]
+            costs[max_iterations] += [cost]
+            lengths[max_iterations] += [len(path)]
+            failures[max_iterations] += fails
+        failures[max_iterations] = failures[max_iterations] / (len(futs[max_iterations]) + failures[max_iterations])
+        print(f"max iters {max_iterations} had failure rate {failures[max_iterations]*100:.1f}%, cost {np.mean(costs[max_iterations]):.2f}, elapsed {np.mean(times[max_iterations]):.2f}")
+
     latex_str = "\\begin{table}[!h]\n\\begin{center}\n\\begin{tabular}{l|l|l|l}\nMax Iterations of RRT-CaKC & Cost & Path Length & Time \\\\\n"
     for max_iters in costs:
         cost = np.mean(costs[max_iters])
         length = np.mean(lengths[max_iters])
         elapsed = np.mean(times[max_iters])
-        latex_str += f"{int(max_iters):n} & {cost:.3f} & {length:.1f} & {elapsed:.1f}s\\\\\n"
+        fails = failures[max_iters]
+        latex_str += f"{int(max_iters):n} & {cost:.3f} & {length:.1f} & {elapsed:.1f}s & {fails*100:.1f}%%\\\\\n"
     latex_str += f"\\end{{tabular}}\n\\caption{{Comparison of best cost and time performance for various maximum iteration limits for RRT-CaKC. Experiments were run over {trials} trials.}}\n\\end{{center}}\\end{{table}}"
     print(latex_str)
     print()
 
     xs = sorted(list(costs.keys()))
-    ys = [costs[k] for k in xs]
+    ys = [np.mean(costs[k]) for k in xs]
     import matplotlib.pyplot as plt
-    plt.plot(xs, ys)
+    plt.plot(xs, ys, alpha=0.8, color='green')
     plt.title('Mean path cost of RRT-CaKC as function of max iterations')
     plt.xlabel('Maximum # of iterations')
-    plt.ylabel('Mean path cost over {trials} trials')
+    plt.ylabel(f'Mean path cost over {trials} trials')
     plt.show()
-    plt.imsave('/tmp/fig1.png')
+    #plt.imsave('/tmp/fig2.png', )
 
 
 if __name__ == '__main__':
-    #generate_fig_1()
+    generate_fig_1()
     #generate_table_1()
-    generate_table_2()
+    #generate_table_2()
