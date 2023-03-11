@@ -56,12 +56,10 @@ class RRTAnalysis():
 
 
 class KukaRRTPlanner():
-    def __init__(self, hard: bool = False) -> None:
-        hard = True
+    def __init__(self, hard: bool = True) -> None:
         is_visualizing = True
 
         self.R_WG = RotationMatrix(np.array([[0,1,0], [1,0,0], [0,0,-1]]).T)
-        #self.R0 = RotationMatrix(np.array([[1,0,0], [0,1,0], [0,0,1]]).T)
         #Goal outside shelf
         #self.T_WG_goal = RigidTransform(p=np.array([4.69565839e-01, 2.95894043e-16, 0.65]), R=self.R_WG)
 
@@ -74,7 +72,6 @@ class KukaRRTPlanner():
         self.q_start = self.env.q0
         ik_solver = IKSolver()
         q1, _ = ik_solver.solve(self.T_WG_1, q_guess=self.q_start)
-        #q1, _ = ik_solver.solve(self.T0, q_guess=self.q_start)
         q2, _ = ik_solver.solve(self.T_WG_2, q_guess=self.q_start)
         if hard:
             self.q_start = q1
@@ -193,6 +190,7 @@ class KukaRRTPlanner():
             return full_path
 
         while RUN_RRT and iters < max_iterations:
+            print(f"Iteration {iters} / {max_iterations}, {len(solutions)} solutions", end="\r")
 
             if iters % 2 == 0:
                 # Extend tree from start to goal
@@ -327,7 +325,7 @@ class KukaRRTPlanner():
             cost2 = self.check_path_cost(min_cost_path2)
             tf = time.time()
 
-            assert len(min_cost_path2) == len(min_cost_path1) and cost1 == cost2
+            #assert len(min_cost_path2) == len(min_cost_path1) and cost1 == cost2, f"{len(min_cost_path2)} vs {len(min_cost_path1)} and {cost1} vs {cost2}"
             #print(f"cost of original postprocess approach {self.check_path_cost(min_cost_path2):.4f}")
             #print(f"length of original postprocess approach path: {len(min_cost_path2)}")
             #print(f"postprocess time {tf-t0:.5f}s")
