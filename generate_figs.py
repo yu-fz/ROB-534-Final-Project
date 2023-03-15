@@ -5,8 +5,8 @@ import numpy as np
 from kuka_rrt_planner import KukaRRTPlanner, RRTAnalysis
 
 
-@ray.remote
-def rrt_connect(*args, retry_failures: bool = False, **kwargs):
+@ray.remote(num_cpus=1)
+def rrt_connect(*args, retry_failures: bool = False, postprocess: bool = False, **kwargs):
     kuka_rrt = KukaRRTPlanner()
     logger = RRTAnalysis()
 
@@ -15,6 +15,10 @@ def rrt_connect(*args, retry_failures: bool = False, **kwargs):
         try:
             start = time.time()
             path = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger, *args, **kwargs)
+
+            if postprocess:
+                path = kuka_rrt.post_process_rrt_path(path)
+
             end = time.time()
             return path, end - start, kuka_rrt.check_path_cost(path), failures
         except ValueError:
@@ -38,40 +42,27 @@ def generate_table_1(trials: int = 15):
              **_make_algo_dict('RRT-C + PP'),
              **_make_algo_dict('RRT-CaKC'),
              **_make_algo_dict('RRT-CaKC + PP')}
+    futs = {}
     for algo in algos:
-        for trial in range(TRIALS):
-            kuka_rrt = KukaRRTPlanner()
-            logger = RRTAnalysis()
-
+        futs[algo] = []
+        for trial in range(trials):
             return_first = True if 'CaKC' not in algo else False
+            while unused_cpus() == 0:
+                time.sleep(1)
+            print(f"Dispatching job for algo {algo}...")
+            fut = rrt_connect.remote(max_iterations=max_iterations, return_first=return_first, retry_failures=True, postprocess='PP' in algo)
+            futs[algo] += [fut]
 
-            start = time.time()
-            while True:
-                try:
-                    path_to_goal = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem,
-                                                                 logger,
-                                                                 return_first=return_first)
-                    break
-                except ValueError:
-                    print(f"RRT failed to solve, trying again...")
-
-            if 'PP' in algo:
-                path_to_goal = kuka_rrt.post_process_rrt_path(path_to_goal)
-            end = time.time()
-
-            algos[algo]['cost'] += [kuka_rrt.check_path_cost(path_to_goal)]
-            algos[algo]['time'] += [end - start]
-            algos[algo]['path length'] += [len(path_to_goal)]
+    for algo in algos:
+        for fut in futs[algo]:
+            path, elapsed, cost, fails = ray.get(fut)
+            algos[algo]['cost'] = cost
+            algos[algo]['time'] = elapsed
+            algos[algo]['path length'] = len(path)
 
             print(f"{algo} Trial {trial+1} path length: {algos[algo]['path length'][-1]}")
             print(f"{algo} Trial {trial+1} path cost: {algos[algo]['cost'][-1]:.3f}")
             print(f"{algo} Trial {trial+1} time: {algos[algo]['time'][-1]:.4f}s")
-
-            assert np.array_equal(np.array(path_to_goal[0]),kuka_rrt.q_start)
-            assert np.array_equal(np.array(path_to_goal[-1]),kuka_rrt.q_goal)
-
-            #kuka_rrt.render_RRT_Solution(better_path)
-            #input()
 
     latex_str = "\\begin{table}[!h]\n\\begin{center}\n\\begin{tabular}{l|l|l|l}\nAlgorithm & Cost & Path Length & Time \\\\\n"
     for algo in algos:
@@ -116,12 +107,22 @@ def generate_table_2(trials: int = 10):
     print()
 
 
-def generate_fig_1(trials: int = 20):
+def generate_fig_1(trials: int = 5):
+    import pathlib, pickle
     ray.init(num_cpus=8)
     print("Generating Figure 1...")
     futs = {}
-    for max_iterations in [4e3, 5e3, 6e3, 7e3, 8e3, 9e3, 1e4]:#, 2e4, 3e4, 4e4, 5e4]:
+    #for max_iterations in [1e3, 2e3, 3e3, 4e3, 5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 1.5e4, 2e4, 2.5e4, 3e4, 3.5e4]:
+    for i in list(range(50)) + [55, 60, 75]:
+        max_iterations = int(3e3 + i * 1e3/2)
+
         futs[max_iterations] = []
+        fname = f'iter-{max_iterations}-trials-{trials}'
+
+        if pathlib.Path(fname).exists():
+            print(f"{fname} cache exists, skipping max iters {max_iterations} and trials {trials}")
+            continue
+
         for trial in range(trials):
             start = time.time()
             while unused_cpus() == 0:
@@ -140,17 +141,33 @@ def generate_fig_1(trials: int = 20):
         costs[max_iterations] = []
         times[max_iterations] = []
         failures[max_iterations] = 0
-        for fut in futs[max_iterations]:
-            ret = ray.get(fut)
 
-            path, elapsed, cost, fails = ret
-            times[max_iterations] += [elapsed]
-            costs[max_iterations] += [cost]
-            lengths[max_iterations] += [len(path)]
-            failures[max_iterations] += fails
-        failures[max_iterations] = failures[max_iterations] / (len(futs[max_iterations]) + failures[max_iterations])
+        fname = f'iter-{max_iterations}-trials-{trials}'
+
+        if pathlib.Path(fname).exists():
+            print(f"Loading cache {fname}")
+            with open(fname, 'rb') as f:
+                data = pickle.load(f)
+                times[max_iterations] = data['times']
+                costs[max_iterations] = data['costs']
+                lengths[max_iterations] = data['lengths']
+                failures[max_iterations] = data['failures']
+        else:
+            print(f"Making cache {fname}")
+            for fut in futs[max_iterations]:
+                ret = ray.get(fut)
+
+                path, elapsed, cost, fails = ret
+                times[max_iterations] += [elapsed]
+                costs[max_iterations] += [cost]
+                lengths[max_iterations] += [len(path)]
+                failures[max_iterations] += fails
+            failures[max_iterations] = failures[max_iterations] / (len(futs[max_iterations]) + failures[max_iterations])
+            with open(fname, 'wb') as f:
+                pickle.dump({'times': times[max_iterations], 'costs': costs[max_iterations], 'lengths': lengths[max_iterations], 'failures': failures[max_iterations]}, f)
         print(f"max iters {max_iterations} had failure rate {failures[max_iterations]*100:.1f}%, cost {np.mean(costs[max_iterations]):.2f}, elapsed {np.mean(times[max_iterations]):.2f}")
 
+    # Generate a table
     latex_str = "\\begin{table}[!h]\n\\begin{center}\n\\begin{tabular}{l|l|l|l}\nMax Iterations of RRT-CaKC & Cost & Path Length & Time \\\\\n"
     for max_iters in costs:
         cost = np.mean(costs[max_iters])
@@ -162,14 +179,32 @@ def generate_fig_1(trials: int = 20):
     print(latex_str)
     print()
 
-    xs = sorted(list(costs.keys()))
-    ys = [np.mean(costs[k]) for k in xs]
+    # Generate a figure
     import matplotlib.pyplot as plt
-    plt.plot(xs, ys, alpha=0.8, color='green')
-    plt.title('Mean path cost of RRT-CaKC as function of max iterations')
-    plt.xlabel('Maximum # of iterations')
-    plt.ylabel(f'Mean path cost over {trials} trials')
+    xs = sorted(list(costs.keys()))
+    #fig, ((ax1, ax2, ax3)) = plt.subplots(3, 1, figsize=(4,8))
+    fig, ((ax1)) = plt.subplots(1, 1, figsize=(4,4))
+    data = [
+        (ax1, np.array([np.mean(costs[k]) for k in xs]), np.array([np.std(costs[k]) for k in xs]), 'green', 'Mean path cost'),
+        #(ax1, np.array([np.mean(failures[k]) for k in xs]), np.array([np.std(failures[k]) for k in xs]), 'green', 'Mean failure rate'),
+        #(ax1, np.array([np.mean(times[k]) for k in xs]), np.array([np.std(times[k]) for k in xs]), 'green', 'Mean elapsed time'),
+        #(ax2, [np.mean(times[k]) for k in xs], 'blue', 'Mean elapsed time'),
+        #(ax3, [failures[k] for k in xs], 'red', 'Failure rate'),
+    ]
+    plt.title(f'RRT-CaKC over {trials} trials')
+    for ax, ys, sd, color, desc in data:
+        ax.plot(xs, ys, alpha=0.8, color=color)
+        y_m = ys - sd
+        y_p = ys + sd
+        ax.fill_between(xs, y_m, y_p, alpha=0.4)
+        #ax.set_title(f'{desc} of RRT-CaKC as function of max iterations')
+        ax.set_ylim(bottom=0, top=max(y_p)*1.1)
+        ax.set_xlabel('Maximum # of iterations')
+        ax.set_ylabel(f'{desc}')
+    fig.tight_layout()
+    #plt.subplots_adjust(left=0.1, right=0.9, top=0.9, bottom=0.1)
     plt.show()
+    print("Showed plot")
     #plt.imsave('/tmp/fig2.png', )
 
 

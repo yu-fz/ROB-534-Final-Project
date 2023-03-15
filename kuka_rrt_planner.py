@@ -179,7 +179,8 @@ class KukaRRTPlanner():
             return full_path
 
         while RUN_RRT and iters < max_iterations:
-            #print(f"Iteration {iters} / {max_iterations}, {len(solutions)} solutions", end="\r")
+            if iters % 5000 == 0:
+                print(f"Iteration {iters} / {max_iterations}, {len(solutions)} solutions")
 
             if iters % 2 == 0:
                 # Extend tree from start to goal
