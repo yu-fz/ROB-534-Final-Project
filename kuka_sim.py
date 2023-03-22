@@ -254,7 +254,7 @@ class TreeNode:
         self.value = value  # tuple of floats representing a configuration
         self.cost = (parent.cost + np.linalg.norm(np.array(value) - parent.value)) if parent is not None else 0
         self.parent = parent  # another TreeNode
-        self.children = []  # list of TreeNodes
+        self.children = []  # list of child configurations
 
 class RRT:
     """
@@ -266,12 +266,50 @@ class RRT:
         self.size = 1  # int length of path
         self.max_recursion = 1000  # int length of longest possible path
         self.configurations_dict = {self.root.value: self.root} # dict of all nodes added to RRT tree, starting with a single root node
+        assert self.size == len(self.configurations_dict), f"{self.size} vs {len(self.configurations_dict)}"
 
     def add_configuration(self, parent_node, child_value):
+        if child_value in self.configurations_dict:
+            return self.configurations_dict[child_value]
+
+        assert self.size == len(self.configurations_dict), f"{self.size} vs {len(self.configurations_dict)}"
+        assert child_value not in self.configurations_dict, f"{child_value} already in config dict!"
+
         child_node = TreeNode(child_value, parent_node)
-        parent_node.children.append(child_node)
+        parent_node.children.append(child_value)
         self.size += 1
+        self.configurations_dict[child_value] = child_node
         return child_node
+
+    def update_tree_cost(self, node: TreeNode, encountered: set = None):
+        if encountered is None:
+            encountered = set()
+        assert node not in encountered
+        encountered |= {node}
+        for child_value in node.children:
+            this_q = np.array(node.value)
+            child_q = np.array(child_value)
+            cost = self.configurations_dict[node.value].cost
+            self.configurations_dict[child_value].cost = cost + np.linalg.norm(this_q - child_q)
+            encountered |= self.update_tree_cost(self.configurations_dict[child_value], encountered=encountered)
+        return encountered
+
+    def rewire(self, neighborhood, new_parent_candidate):
+        assert new_parent_candidate.value in self.configurations_dict
+        for n in neighborhood:
+            assert n.value in self.configurations_dict
+
+        for node in neighborhood:
+            new_cost = new_parent_candidate.cost + np.linalg.norm(np.array(new_parent_candidate.value) - node.value)
+            if new_cost < node.cost:
+                # Remove this node from its old parent
+                self.configurations_dict[node.parent.value].children.remove(node.value)
+
+                # Add this node as a child of its new parent
+                self.configurations_dict[new_parent_candidate.value].children += [node.value]
+                self.configurations_dict[node.value].parent = new_parent_candidate
+                self.configurations_dict[node.value].cost = new_cost
+        self.update_tree_cost(new_parent_candidate)
 
     def kd_nearest(self, configuration, k: int = 1):
         """
@@ -294,7 +332,7 @@ class RRT:
         # Build KD-tree
         config_kd_tree = KDTree(all_configurations)
         distance, index = config_kd_tree.query(x=configuration, k=k) #query KD tree for nearest neighbor
-        if not type(distance) == list:
+        if type(distance) == float:
             distance = [distance]
             index = [index]
 
@@ -309,30 +347,3 @@ class RRT:
         # find which node is the nearest neighbor by querying the configurations dictionary
         closest = [self.configurations_dict[configuration_vectors[i]] for i in index]
         return closest, distance
-
-    # Brute force nearest, handles general distance functions
-    def nearest(self, configuration):
-        """
-        Finds the nearest node by distance to configuration in the
-             configuration space.
-
-        Args:
-            configuration: tuple of floats representing a configuration of a
-                robot
-
-        Returns:
-            closest: TreeNode. the closest node in the configuration space
-                to configuration
-            distance: float. distance from configuration to closest
-        """
-        assert self.cspace.valid_configuration(configuration)
-        def recur(node, depth=0):
-            closest, distance = node, self.cspace.distance(node.value, configuration)
-            if depth < self.max_recursion:
-                for child in node.children:
-                    (child_closest, child_distance) = recur(child, depth+1)
-                    if child_distance < distance:
-                        closest = child_closest
-                        child_distance = child_distance
-            return closest, distance
-        return recur(self.root)[0]

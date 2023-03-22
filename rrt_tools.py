@@ -13,7 +13,6 @@ class RRT_tools:
         self.problem = problem
 
     def find_nearest_node_in_RRT_graph(self, q_sample, k: int = 1):
-        #nearest_node = self.rrt_tree.nearest(q_sample)
         nearest_node,_ = self.rrt_tree.kd_nearest(q_sample, k=k) #much faster
         return nearest_node
 

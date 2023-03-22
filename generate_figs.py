@@ -4,6 +4,8 @@ import numpy as np
 
 from kuka_rrt_planner import KukaRRTPlanner, RRTAnalysis
 
+import locale
+locale.setlocale(locale.LC_ALL, '')
 
 @ray.remote(num_cpus=1, max_retries=0)
 def rrt_connect(*args, retry_failures: bool = False, postprocess: bool = False, rewire: bool = False, **kwargs):
@@ -34,43 +36,57 @@ def unused_cpus():
     return int(resources['CPU'] if 'CPU' in resources else 0)
 
 
-def generate_table_1(trials: int = 15):
+def generate_table_1(trials: int = 15, max_iterations=1e4):
+    ray.init(num_cpus=8)
     print("Generating table 1...")
     def _make_algo_dict(name):
         return {name: {'time': [], 'cost': [], 'path length': []}}
     algos = {**_make_algo_dict('RRT-C'),
              **_make_algo_dict('RRT-C + PP'),
              **_make_algo_dict('RRT-CaKC'),
-             **_make_algo_dict('RRT-CaKC + PP')}
+             **_make_algo_dict('RRT-CaKC + PP'),
+             **_make_algo_dict('RRT*-CaKC'),
+             **_make_algo_dict('RRT*-CaKC + PP')}
     futs = {}
     for algo in algos:
         futs[algo] = []
         for trial in range(trials):
             return_first = True if 'CaKC' not in algo else False
+            postprocess = 'PP' in algo
+            rewire = '*' in algo
             while unused_cpus() == 0:
                 time.sleep(1)
-            print(f"Dispatching job for algo {algo}...")
-            fut = rrt_connect.remote(max_iterations=max_iterations, return_first=return_first, retry_failures=True, postprocess='PP' in algo)
+            print(f"Dispatching algo {algo} trial {trial+1}...")
+            fut = rrt_connect.remote(max_iterations=max_iterations,
+                                     return_first=return_first,
+                                     retry_failures=True,
+                                     postprocess=postprocess,
+                                     rewire=rewire)
             futs[algo] += [fut]
+            time.sleep(0.5)
 
     for algo in algos:
         for fut in futs[algo]:
             path, elapsed, cost, fails = ray.get(fut)
-            algos[algo]['cost'] = cost
-            algos[algo]['time'] = elapsed
-            algos[algo]['path length'] = len(path)
+            algos[algo]['cost'] += [cost]
+            algos[algo]['time'] += [elapsed]
+            algos[algo]['path length'] += [len(path)]
 
             print(f"{algo} Trial {trial+1} path length: {algos[algo]['path length'][-1]}")
             print(f"{algo} Trial {trial+1} path cost: {algos[algo]['cost'][-1]:.3f}")
             print(f"{algo} Trial {trial+1} time: {algos[algo]['time'][-1]:.4f}s")
 
-    latex_str = "\\begin{table}[!h]\n\\begin{center}\n\\begin{tabular}{l|l|l|l}\nAlgorithm & Cost & Path Length & Time \\\\\n"
-    for algo in algos:
+    latex_str = "\\begin{table}[!h]\n\\begin{center}\n\\begin{tabular}{l|l|l|l}\nAlgorithm & Cost & Path Length & Time \\\\\\hline \n"
+    sorted_keys = sorted(list(algos.keys()), key=lambda x: np.mean(algos[x]['cost']))
+    for algo in sorted_keys:
         cost = np.mean(algos[algo]['cost'])
+        cost_sd = np.std(algos[algo]['cost'])
         length = np.mean(algos[algo]['path length'])
+        length_sd = np.std(algos[algo]['path length'])
         elapsed = np.mean(algos[algo]['time'])
-        latex_str += f"{algo} & {cost:.3f} & {length:.1f} & {elapsed:.1f}s\\\\\n"
-    latex_str += f"\\end{{tabular}}\n\\caption{{Comparison of cost and time performance for each algorithm we tested. Experiments were run over {TRIALS} trials.}}\n\\end{{center}}\\end{{table}}"
+        elapsed_sd = np.std(algos[algo]['time'])
+        latex_str += f"{algo} & ${cost:.1f} \\pm {cost_sd:.1f}$  & ${length:.1f} \pm {length_sd:.1f}$ & ${elapsed:.1f}s \pm {elapsed_sd:.1f}$\\\\\n"
+    latex_str += f"\\hline\\end{{tabular}}\n\\caption{{Comparison of mean $\pm$ standard deviation of cost and time performance for each algorithm we tested. Experiments were run over {trials} trials, and trials were capped at a maximum of {max_iterations:n} sampling iterations.}}\n\\end{{center}}\\end{{table}}"
     print(latex_str)
     print()
 
@@ -113,7 +129,7 @@ def generate_fig_1(trials: int = 5):
     print("Generating Figure 1...")
     futs = {}
     #for max_iterations in [1e3, 2e3, 3e3, 4e3, 5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 1.5e4, 2e4, 2.5e4, 3e4, 3.5e4]:
-    for i in list(range(85)):
+    for i in list(range(40)):
         max_iterations = int(3e3 + i * 1e3/2)
 
         futs[max_iterations] = []
@@ -129,7 +145,7 @@ def generate_fig_1(trials: int = 5):
                 time.sleep(1)
 
             print(f"Dispatching job with max iters {max_iterations} trial {trial+1} of {trials}...")
-            fut = rrt_connect.remote(max_iterations=max_iterations, return_first=False, retry_failures=True)
+            fut = rrt_connect.remote(max_iterations=max_iterations, return_first=False, retry_failures=True, rewire=True)
             futs[max_iterations] += [fut]
 
     lengths = {}
@@ -209,9 +225,6 @@ def generate_fig_1(trials: int = 5):
 
 
 if __name__ == '__main__':
-    ray.init(num_cpus=1)
-    fut = rrt_connect.remote(return_first=False, retry_failures=False, postprocess=False, rewire=True)
-    ray.get(fut)
-    #generate_fig_1()
+    generate_fig_1()
     #generate_table_1()
     #generate_table_2()

@@ -8,6 +8,19 @@ import matplotlib.pyplot as plt
 from pydrake.all import PiecewisePolynomial
 
 
+def update_tree_cost(node: TreeNode, encountered: set = None):
+    if encountered is None:
+        encountered = set()
+    assert node not in encountered
+    encountered |= {node}
+    for child in node.children:
+        this_q = np.array(node.value)
+        child_q = np.array(child.value)
+        child.cost = node.cost + np.linalg.norm(this_q - child_q)
+        encountered |= update_tree_cost(child, encountered=encountered)
+    return encountered
+
+
 class RRTAnalysis():
     def __init__(self) -> None:
         self.start_to_goal_tree = None
@@ -56,7 +69,7 @@ class RRTAnalysis():
 
 
 class KukaRRTPlanner():
-    def __init__(self, hard: bool = True, vis: bool = False) -> None:
+    def __init__(self, hard: bool = False, vis: bool = False) -> None:
         self.R_WG = RotationMatrix(np.array([[0,1,0], [1,0,0], [0,0,-1]]).T)
         #Goal outside shelf
         #self.T_WG_goal = RigidTransform(p=np.array([4.69565839e-01, 2.95894043e-16, 0.65]), R=self.R_WG)
@@ -109,7 +122,7 @@ class KukaRRTPlanner():
         #Find nearest neighbor node
         nearest_neighbor_nodes = rrt.find_nearest_node_in_RRT_graph(new_q_sample, k=10 if rewire else 1)
         if rewire:
-            nearest_neighbor_node = min(nearest_neighbor_nodes, key=lambda o: o.cost)
+            nearest_neighbor_node = min(nearest_neighbor_nodes, key=lambda o: o.cost + np.linalg.norm(np.array(o.value) - new_q_sample))
         else:
             nearest_neighbor_node = nearest_neighbor_nodes[0]
 
@@ -119,9 +132,13 @@ class KukaRRTPlanner():
         #Pick the configuration space point as far as possible in direction of sample
         idx = -1
         furthest_safe_q = feasible_path[idx]
-        new_child_node = rrt.grow_rrt_tree(parent_node=nearest_neighbor_node, q_sample=furthest_safe_q)
-        #add new node to dict for kd-tree
-        rrt.rrt_tree.configurations_dict[new_child_node.value] = new_child_node
+        if furthest_safe_q not in rrt.rrt_tree.configurations_dict:
+            rrt.grow_rrt_tree(parent_node=nearest_neighbor_node, q_sample=furthest_safe_q)
+
+        new_child_node = rrt.rrt_tree.configurations_dict[furthest_safe_q]
+
+        if rewire:
+            rrt.rrt_tree.rewire(nearest_neighbor_nodes, new_child_node)
         logger.log_connection_length(nearest_neighbor_node, new_child_node)
         return rrt, new_child_node
 
@@ -138,7 +155,7 @@ class KukaRRTPlanner():
         """
         nearest_neighbor_nodes = rrt_B.find_nearest_node_in_RRT_graph(rrt_A_child_node.value, k=10 if rewire else 1)
         if rewire:
-            nearest_neighbor_node = min(nearest_neighbor_nodes, key=lambda o: o.cost)
+            nearest_neighbor_node = min(nearest_neighbor_nodes, key=lambda o: o.cost + np.linalg.norm(np.array(o.value) - rrt_A_child_node.value))
         else:
             nearest_neighbor_node = nearest_neighbor_nodes[0]
 
@@ -202,11 +219,12 @@ class KukaRRTPlanner():
                 #else sample random point in cspace
                     new_configuration_space_sample = start_to_goal_rrt_tools.sample_node_in_configuration_space()
                 # Extend tree
+                new_configuration_space_sample = tuple(x + np.random.normal(0, 1e-16) for x in new_configuration_space_sample)
                 start_to_goal_rrt_tools, newest_child_node = self.rrt_extend_operation(new_configuration_space_sample,start_to_goal_rrt_tools, logger, rewire=rewire)
                 # Attempt to connect from the goal rooted tree
                 success, connecting_node = self.rrt_connect_operation(newest_child_node,
                                                                       goal_to_start_rrt_tools,
-                                                                      rewire=rewire)
+                                                                      rewire=False)
                 if success:
                     #RUN_RRT = False
                     seq = backup_path(start_to_goal_rrt_tools,newest_child_node,goal_to_start_rrt_tools,connecting_node)
@@ -225,11 +243,12 @@ class KukaRRTPlanner():
                 #else sample random point in cspace
                     new_configuration_space_sample = goal_to_start_rrt_tools.sample_node_in_configuration_space()
                 # Extend tree
+                new_configuration_space_sample = tuple(x + np.random.normal(0, 1e-16) for x in new_configuration_space_sample)
                 goal_to_start_rrt_tools, newest_child_node = self.rrt_extend_operation(new_configuration_space_sample,goal_to_start_rrt_tools, logger, rewire=rewire)
                 # Attempt to connect from the goal rooted tree
                 success, connecting_node = self.rrt_connect_operation(newest_child_node,
                                                                       start_to_goal_rrt_tools,
-                                                                      rewire=rewire)
+                                                                      rewire=False)
 
                 if success:
                     seq = backup_path(start_to_goal_rrt_tools,connecting_node,goal_to_start_rrt_tools,newest_child_node)
@@ -454,16 +473,18 @@ def astar(graph: PathDAG) -> list:
     raise RuntimeError
 
 if __name__ == '__main__':
-    kuka_rrt = KukaRRTPlanner()
+    kuka_rrt = KukaRRTPlanner(vis=True)
     logger = RRTAnalysis()
     start_rrt = time.time()
-    path_to_goal = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger, rewire=False, max_iterations=2e4)
+    path_to_goal = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger, rewire=True, max_iterations=1e4)
     end_rrt = time.time()
     original_path_cost = kuka_rrt.check_path_cost(path_to_goal)
     print(f"unoptimized path cost: {original_path_cost:.4f}")
     print(f"unoptimized path length: {len(path_to_goal)}")
     #print(f"time spent for rrt connect: {end_rrt - start_rrt:.1f}s")
-    path_to_goal = kuka_rrt.post_process_rrt_path(path_to_goal)
+    #path_to_goal = kuka_rrt.post_process_rrt_path(path_to_goal)
+    #print(f"optimized path cost: {kuka_rrt.check_path_cost(path_to_goal):.4f}")
+    #print(f"optimized path length: {len(path_to_goal)}")
 
     if not np.array_equal(np.array(path_to_goal[0]),kuka_rrt.q_start):
         print(f"Start did not match, {np.linalg.norm(np.array(path_to_goal[0]) - kuka_rrt.q_start):.6f}")
