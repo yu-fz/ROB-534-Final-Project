@@ -6,7 +6,7 @@ import scipy.interpolate
 import numpy as np
 import matplotlib.pyplot as plt
 from pydrake.all import PiecewisePolynomial
-
+from pydrake.geometry import Role
 
 def update_tree_cost(node: TreeNode, encountered: set = None):
     if encountered is None:
@@ -365,6 +365,17 @@ class KukaRRTPlanner():
         Animate RRT path
         """
         animation_env = ManipulationStationSim(self.meshcat,True)
+        plant_source_id = animation_env.plant.get_source_id()
+        wsg_gripper_model_instance = animation_env.plant.GetModelInstanceByName("wsg")
+        wsg_gripper_body = animation_env.plant.GetBodyByName("body",wsg_gripper_model_instance)
+        wsg_gripper_left_finger = animation_env.plant.GetBodyByName("left_finger",wsg_gripper_model_instance)
+        wsg_gripper_right_finger = animation_env.plant.GetBodyByName("right_finger",wsg_gripper_model_instance)
+        bodies_to_remove_collisions = [wsg_gripper_left_finger,wsg_gripper_right_finger]
+        for body in bodies_to_remove_collisions:
+            geometry_id_list = animation_env.plant.GetCollisionGeometriesForBody(body)
+            for geometry_id in geometry_id_list:
+                animation_env.scene_graph.RemoveRole(animation_env.context_scene_graph,plant_source_id,geometry_id,Role.kProximity)
+
         animation_env.DrawStation(rrt_solution[0], self.gripper_setpoint,self.left_door_angle,self.right_door_angle)
         time.sleep(3)
         if len(rrt_solution) == 0:
@@ -492,7 +503,8 @@ if __name__ == '__main__':
         print(f"Start did not match, {np.linalg.norm(np.array(path_to_goal[-1]) - kuka_rrt.q_goal):.6f}")
 
     end_time = time.time()
-    kuka_rrt.render_RRT_Solution(path_to_goal)
+    if kuka_rrt.meshcat is not None:
+        kuka_rrt.render_RRT_Solution(path_to_goal)
 
 # plt.plot(logger.time_log,logger.start_to_goal_tree_size_log)
 # plt.show()
