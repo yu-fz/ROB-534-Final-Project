@@ -252,6 +252,7 @@ class IKSolver(object):
 class TreeNode:
     def __init__(self, value, parent=None):
         self.value = value  # tuple of floats representing a configuration
+        self.cost = (parent.cost + np.linalg.norm(np.array(value) - parent.value)) if parent is not None else 0
         self.parent = parent  # another TreeNode
         self.children = []  # list of TreeNodes
 
@@ -271,7 +272,8 @@ class RRT:
         parent_node.children.append(child_node)
         self.size += 1
         return child_node
-    def kd_nearest(self, configuration):
+
+    def kd_nearest(self, configuration, k: int = 1):
         """
         Finds the nearest node by distance to configuration in the configuration space using a KD-tree.
         Args:
@@ -285,13 +287,27 @@ class RRT:
         assert self.cspace.valid_configuration(configuration)
         # Take all c-space vector keys in configurations dict and convert it to np array
         configuration_vectors = list(self.configurations_dict.keys())
+
         # convert list of configuration vectors to np array
         all_configurations = np.array(configuration_vectors)
+
         # Build KD-tree
         config_kd_tree = KDTree(all_configurations)
-        distance, index = config_kd_tree.query(x=configuration,k=1) #query KD tree for nearest neighbor
+        distance, index = config_kd_tree.query(x=configuration, k=k) #query KD tree for nearest neighbor
+        if not type(distance) == list:
+            distance = [distance]
+            index = [index]
+
+        valid_distance, valid_index = [], []
+        for d, i in zip(distance, index):
+            if np.isfinite(d):
+                valid_distance += [d]
+                valid_index += [i]
+        distance = valid_distance
+        index = valid_index
+
         # find which node is the nearest neighbor by querying the configurations dictionary
-        closest = self.configurations_dict[configuration_vectors[index]]
+        closest = [self.configurations_dict[configuration_vectors[i]] for i in index]
         return closest, distance
 
     # Brute force nearest, handles general distance functions

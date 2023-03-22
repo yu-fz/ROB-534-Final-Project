@@ -5,8 +5,8 @@ import numpy as np
 from kuka_rrt_planner import KukaRRTPlanner, RRTAnalysis
 
 
-@ray.remote(num_cpus=1)
-def rrt_connect(*args, retry_failures: bool = False, postprocess: bool = False, **kwargs):
+@ray.remote(num_cpus=1, max_retries=0)
+def rrt_connect(*args, retry_failures: bool = False, postprocess: bool = False, rewire: bool = False, **kwargs):
     kuka_rrt = KukaRRTPlanner()
     logger = RRTAnalysis()
 
@@ -14,7 +14,7 @@ def rrt_connect(*args, retry_failures: bool = False, postprocess: bool = False, 
     while True:
         try:
             start = time.time()
-            path = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger, *args, **kwargs)
+            path = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger, *args, rewire=rewire, **kwargs)
 
             if postprocess:
                 path = kuka_rrt.post_process_rrt_path(path)
@@ -113,7 +113,7 @@ def generate_fig_1(trials: int = 5):
     print("Generating Figure 1...")
     futs = {}
     #for max_iterations in [1e3, 2e3, 3e3, 4e3, 5e3, 6e3, 7e3, 8e3, 9e3, 1e4, 1.5e4, 2e4, 2.5e4, 3e4, 3.5e4]:
-    for i in list(range(50)) + [55, 60, 75]:
+    for i in list(range(85)):
         max_iterations = int(3e3 + i * 1e3/2)
 
         futs[max_iterations] = []
@@ -128,7 +128,7 @@ def generate_fig_1(trials: int = 5):
             while unused_cpus() == 0:
                 time.sleep(1)
 
-            print(f"Dispatching job with max iters {max_iterations}...")
+            print(f"Dispatching job with max iters {max_iterations} trial {trial+1} of {trials}...")
             fut = rrt_connect.remote(max_iterations=max_iterations, return_first=False, retry_failures=True)
             futs[max_iterations] += [fut]
 
@@ -209,6 +209,9 @@ def generate_fig_1(trials: int = 5):
 
 
 if __name__ == '__main__':
-    generate_fig_1()
+    ray.init(num_cpus=1)
+    fut = rrt_connect.remote(return_first=False, retry_failures=False, postprocess=False, rewire=True)
+    ray.get(fut)
+    #generate_fig_1()
     #generate_table_1()
     #generate_table_2()
