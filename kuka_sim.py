@@ -294,22 +294,6 @@ class RRT:
             encountered |= self.update_tree_cost(self.configurations_dict[child_value], encountered=encountered)
         return encountered
 
-    def rewire(self, neighborhood, new_parent_candidate):
-        assert new_parent_candidate.value in self.configurations_dict
-        for n in neighborhood:
-            assert n.value in self.configurations_dict
-
-        for node in neighborhood:
-            new_cost = new_parent_candidate.cost + np.linalg.norm(np.array(new_parent_candidate.value) - node.value)
-            if new_cost < node.cost:
-                # Remove this node from its old parent
-                self.configurations_dict[node.parent.value].children.remove(node.value)
-
-                # Add this node as a child of its new parent
-                self.configurations_dict[new_parent_candidate.value].children += [node.value]
-                self.configurations_dict[node.value].parent = new_parent_candidate
-                self.configurations_dict[node.value].cost = new_cost
-        self.update_tree_cost(new_parent_candidate)
 
     def kd_nearest(self, configuration, k: int = 1):
         """

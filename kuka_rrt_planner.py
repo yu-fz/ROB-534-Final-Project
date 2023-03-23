@@ -138,7 +138,7 @@ class KukaRRTPlanner():
         new_child_node = rrt.rrt_tree.configurations_dict[furthest_safe_q]
 
         if rewire:
-            rrt.rrt_tree.rewire(nearest_neighbor_nodes, new_child_node)
+            rrt.rewire(nearest_neighbor_nodes, new_child_node)
         logger.log_connection_length(nearest_neighbor_node, new_child_node)
         return rrt, new_child_node
 
@@ -484,7 +484,7 @@ def astar(graph: PathDAG) -> list:
     raise RuntimeError
 
 if __name__ == '__main__':
-    kuka_rrt = KukaRRTPlanner(vis=True)
+    kuka_rrt = KukaRRTPlanner(hard=True,vis=True)
     logger = RRTAnalysis()
     start_rrt = time.time()
     path_to_goal = kuka_rrt.rrt_connect_planning(kuka_rrt.iiwa_problem, logger, rewire=True, max_iterations=1e4)
